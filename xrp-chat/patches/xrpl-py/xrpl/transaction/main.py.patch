@@ -1,0 +1,60 @@
+diff --git a/xrpl/transaction/main.py b/xrpl/transaction/main.py
+index 4c43189..29f313b 100644
+--- a/xrpl/transaction/main.py
++++ b/xrpl/transaction/main.py
+@@ -6,6 +6,7 @@ from xrpl.clients.sync_client import SyncClient
+ from xrpl.models.response import Response
+ from xrpl.models.transactions.transaction import Transaction
+ from xrpl.wallet.main import Wallet
++from xrpl.core.keypairs import ChatNonce
+ 
+ 
+ def safe_sign_and_submit_transaction(
+@@ -14,6 +15,7 @@ def safe_sign_and_submit_transaction(
+     client: SyncClient,
+     autofill: bool = True,
+     check_fee: bool = True,
++    nonce: ChatNonce = None,
+ ) -> Response:
+     """
+     Signs a transaction (locally, without trusting external rippled nodes) and submits
+@@ -37,6 +39,7 @@ def safe_sign_and_submit_transaction(
+             client,
+             autofill,
+             check_fee,
++            nonce=nonce,
+         )
+     )
+ 
+@@ -70,6 +73,7 @@ def safe_sign_transaction(
+     transaction: Transaction,
+     wallet: Wallet,
+     check_fee: bool = True,
++    nonce: ChatNonce = None,
+ ) -> Transaction:
+     """
+     Signs a transaction locally, without trusting external rippled nodes.
+@@ -88,6 +92,7 @@ def safe_sign_transaction(
+             transaction,
+             wallet,
+             check_fee,
++            nonce=nonce,
+         )
+     )
+ 
+@@ -97,6 +102,7 @@ def safe_sign_and_autofill_transaction(
+     wallet: Wallet,
+     client: SyncClient,
+     check_fee: bool = True,
++    nonce: ChatNonce = None,
+ ) -> Transaction:
+     """
+     Signs a transaction locally, without trusting external rippled nodes. Autofills
+@@ -118,6 +124,7 @@ def safe_sign_and_autofill_transaction(
+             wallet,
+             client,
+             check_fee,
++            nonce=nonce,
+         )
+     )
+ 

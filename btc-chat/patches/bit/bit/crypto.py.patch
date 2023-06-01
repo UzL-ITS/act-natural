@@ -1,0 +1,12 @@
+diff --git a/bit/crypto.py b/bit/crypto.py
+index 701700b..2370115 100644
+--- a/bit/crypto.py
++++ b/bit/crypto.py
+@@ -1,6 +1,6 @@
+ from hashlib import new, sha256 as _sha256
+ 
+-from coincurve import PrivateKey as ECPrivateKey, PublicKey as ECPublicKey
++from coincurve import PrivateKey as ECPrivateKey, PublicKey as ECPublicKey, ChatNonce
+ 
+ 
+ def sha256(bytestr):

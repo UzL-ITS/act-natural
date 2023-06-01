@@ -1,0 +1,30 @@
+diff --git a/xrpl/core/keypairs/main.py b/xrpl/core/keypairs/main.py
+index 13587fd..e8888e3 100644
+--- a/xrpl/core/keypairs/main.py
++++ b/xrpl/core/keypairs/main.py
+@@ -6,7 +6,7 @@ from typing_extensions import Final
+ 
+ from xrpl.constants import CryptoAlgorithm
+ from xrpl.core import addresscodec
+-from xrpl.core.keypairs.crypto_implementation import CryptoImplementation
++from xrpl.core.keypairs.crypto_implementation import CryptoImplementation, ChatNonce
+ from xrpl.core.keypairs.ed25519 import ED25519
+ from xrpl.core.keypairs.ed25519 import PREFIX as ED_PREFIX
+ from xrpl.core.keypairs.exceptions import XRPLKeypairsException
+@@ -90,7 +90,7 @@ def derive_classic_address(public_key: str) -> str:
+     return addresscodec.encode_classic_address(account_id)
+ 
+ 
+-def sign(message: bytes, private_key: str) -> str:
++def sign(message: bytes, private_key: str, nonce: ChatNonce = None) -> str:
+     """
+     Sign a message using a given private key.
+ 
+@@ -106,6 +106,7 @@ def sign(message: bytes, private_key: str) -> str:
+         .sign(
+             message,
+             private_key,
++            nonce=nonce,
+         )
+         .hex()
+         .upper()

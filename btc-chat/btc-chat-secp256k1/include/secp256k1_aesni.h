@@ -1,0 +1,112 @@
+#ifndef SECP256K1_AESNI_H
+#define SECP256K1_AESNI_H
+
+#include "secp256k1.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/** Compute the AES 256 key schedule using AES-NI support
+ * 
+ * Out: key:        pointer to an array to be filled with the key schedule
+ * In:  userkey:    pointer to the 32 byte user-provided key used for expansion
+ */
+SECP256K1_API void secp256k1_aesni_256_key_expansion (
+                    unsigned char *key,
+                    const unsigned char *userkey
+) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2);
+
+
+/** Compute the AES inverse key schedule from the key schedule using AES-NI support
+ * 
+ * Out: dec_key:    pointer to an array to be filled with the decryption key schedule
+ * In:  key_sched:  pointer to the key schedule used for encryption
+ *      rounds:     number of AES rounds (10, 12, or 14)
+ */
+SECP256K1_API void secp256k1_aesni_256_dec_key_expansion (
+                    unsigned char *dec_key,
+                    const unsigned char *key_sched
+) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2);
+
+/** Encrypt an AES-ECB plaintext using AES-NI support
+ * 
+ * Out: out:                pointer to the ciphertext buffer
+ * In:  in:                 pointer to the plaintext buffer
+ *      length:             length of the plaintext in bytes
+ *      key:                pointer to the expanded key schedule
+ *      number_of_rounds:   number of AES rounds (10, 12, or 14)
+ * 
+ *  Note - the length of the output buffer out is assumed to be a multiple of 16 bytes
+ */
+SECP256K1_API void secp256k1_aesni_ecb_encrypt (
+                    unsigned char *out,
+                    const unsigned char *in,
+                    unsigned long length,
+                    const unsigned char *key,
+                    int number_of_rounds
+) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(4);
+
+/** Encrypt an AES-CBC plaintext using AES-NI support
+ * 
+ * Out: out:                pointer to the ciphertext buffer
+ * In:  in:                 pointer to the plaintext buffer
+ *      ivec:               pointer to the initialization vector buffer
+ *      length:             length of the plaintext in bytes
+ *      key:                pointer to the expanded key schedule
+ *      number_of_rounds:   number of AES rounds (10, 12, or 14)
+ * 
+ *  Note - the length of the output buffer out is assumed to be a multiple of 16 bytes
+ */
+SECP256K1_API void secp256k1_aesni_cbc_encrypt (
+                    unsigned char *out,
+                    const unsigned char *in,
+                    const unsigned char ivec[16],
+                    unsigned long length,
+                    const unsigned char *key,
+                    int number_of_rounds
+) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(5);
+
+/** Decrypt an AES-ECB ciphertext using AES-NI support
+ * 
+ * Out: out:                pointer to the plaintext buffer
+ * In:  in:                 pointer to the ciphertext buffer
+ *      length:             length of the plaintext in bytes
+ *      key:                pointer to the expanded key schedule
+ *      number_of_rounds:   number of AES rounds (10, 12, or 14)
+ * 
+ *  Note - the length of the output buffer out is assumed to be a multiple of 16 bytes
+ */
+SECP256K1_API void secp256k1_aesni_ecb_decrypt(
+                    unsigned char *out,
+                    const unsigned char *in,
+                    unsigned long length,
+                    const unsigned char *key,
+                    int number_of_rounds
+) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(4);
+
+/** Decrypt an AES-ECB ciphertext using AES-NI support
+ * 
+ * Out: out:                pointer to the plaintext buffer
+ * In:  in:                 pointer to the ciphertext buffer
+ *      ivec:               pointer to the initialization vector buffer
+ *      length:             length of the plaintext in bytes
+ *      key:                pointer to the expanded key schedule
+ *      number_of_rounds:   number of AES rounds (10, 12, or 14)
+ * 
+ *  Note - the length of the output buffer out is assumed to be a multiple of 16 bytes
+ */
+SECP256K1_API void secp256k1_aesni_cbc_decrypt(
+                    unsigned char *out,
+                    const unsigned char *in,
+                    const unsigned char ivec[16],
+                    unsigned long length,
+                    const unsigned char *key,
+                    int number_of_rounds
+) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(5);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* SECP256K1_AESNI_H */

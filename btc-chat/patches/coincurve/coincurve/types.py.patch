@@ -1,0 +1,16 @@
+diff --git a/coincurve/types.py b/coincurve/types.py
+index 1b12ad3..472297d 100644
+--- a/coincurve/types.py
++++ b/coincurve/types.py
+@@ -1,5 +1,5 @@
+ import sys
+-from typing import Optional, Tuple
++from typing import Optional
+ 
+ from ._libsecp256k1 import ffi
+ 
+@@ -10,4 +10,3 @@ else:
+     from typing import Callable
+ 
+ Hasher = Optional[Callable[[bytes], bytes]]
+-Nonce = Tuple[ffi.CData, ffi.CData]

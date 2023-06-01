@@ -1,0 +1,1245 @@
+diff --git a/.cirrus.yml b/.cirrus.yml
+index 9399fbd..631d187 100644
+--- a/.cirrus.yml
++++ b/.cirrus.yml
+@@ -9,6 +9,7 @@ env:
+   RUN_VALGRIND: no
+   EXTRAFLAGS:
+   HOST:
++  AESNI: no
+   ECDH: no
+   RECOVERY: no
+   SCHNORRSIG: no
+@@ -54,10 +55,10 @@ task:
+     memory: 1G
+   matrix: &ENV_MATRIX
+     - env: {WIDEMUL:  int64,  RECOVERY: yes}
+-    - env: {WIDEMUL:  int64,                 ECDH: yes, EXPERIMENTAL: yes, SCHNORRSIG: yes}
++    - env: {WIDEMUL:  int64,                 AESNI: yes, ECDH: yes, EXPERIMENTAL: yes, SCHNORRSIG: yes}
+     - env: {WIDEMUL: int128}
+-    - env: {WIDEMUL: int128,  RECOVERY: yes,            EXPERIMENTAL: yes, SCHNORRSIG: yes}
+-    - env: {WIDEMUL: int128,                 ECDH: yes, EXPERIMENTAL: yes, SCHNORRSIG: yes}
++    - env: {WIDEMUL: int128,  RECOVERY: yes,                        EXPERIMENTAL: yes, SCHNORRSIG: yes}
++    - env: {WIDEMUL: int128,                 AESNI: yes, ECDH: yes, EXPERIMENTAL: yes, SCHNORRSIG: yes}
+     - env: {WIDEMUL: int128,  ASM: x86_64}
+     - env: {BIGNUM: no}
+     - env: {BIGNUM: no,       RECOVERY: yes,            EXPERIMENTAL: yes, SCHNORRSIG: yes}
+@@ -71,6 +72,7 @@ task:
+         UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+         BIGNUM: no
+         ASM: x86_64
++        AESNI: yes
+         ECDH: yes
+         RECOVERY: yes
+         EXPERIMENTAL: yes
+@@ -82,6 +84,7 @@ task:
+         RUN_VALGRIND: yes
+         BIGNUM: no
+         ASM: x86_64
++        AESNI: yes
+         ECDH: yes
+         RECOVERY: yes
+         EXPERIMENTAL: yes
+@@ -106,6 +109,7 @@ task:
+     memory: 1G
+   env:
+     HOST: i686-linux-gnu
++    AESNI: yes
+     ECDH: yes
+     RECOVERY: yes
+     EXPERIMENTAL: yes
+@@ -196,6 +200,7 @@ task:
+     BUILD:
+     WITH_VALGRIND: no
+     BIGNUM: no
++    AESNI: yes
+     ECDH: yes
+     RECOVERY: yes
+     EXPERIMENTAL: yes
+diff --git a/.gitignore b/.gitignore
+index ccdef02..5d147bf 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,7 +1,12 @@
+ bench_inv
++bench_aesni
++bench_ecdsa_sign
++bench_nonceGen
++bench_nonceGenChat
+ bench_ecdh
+ bench_ecmult
+ bench_schnorrsig
++bench_sha256
+ bench_sign
+ bench_verify
+ bench_recover
+diff --git a/Makefile.am b/Makefile.am
+index 023fa60..00131c7 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -90,6 +90,19 @@ bench_internal_CPPFLAGS = -DSECP256K1_BUILD $(SECP_INCLUDES)
+ bench_ecmult_SOURCES = src/bench_ecmult.c
+ bench_ecmult_LDADD = $(SECP_LIBS) $(COMMON_LIB)
+ bench_ecmult_CPPFLAGS = -DSECP256K1_BUILD $(SECP_INCLUDES)
++if ENABLE_MODULE_AESNI
++if ENABLE_MODULE_ECDH
++noinst_PROGRAMS += bench_nonceGen
++bench_nonceGen_SOURCES = src/bench_nonceGen.c
++bench_nonceGen_LDADD = libsecp256k1.la $(SECP_LIBS) $(SECP_TEST_LIBS) $(COMMON_LIB)
++noinst_PROGRAMS += bench_ecdsa_sign
++bench_ecdsa_sign_SOURCES = src/bench_ecdsa_sign.c
++bench_ecdsa_sign_LDADD = libsecp256k1.la $(SECP_LIBS) $(SECP_TEST_LIBS) $(COMMON_LIB)
++noinst_PROGRAMS += bench_sha256
++bench_sha256_SOURCES = src/bench_sha256.c
++bench_sha256_LDADD = libsecp256k1.la $(SECP_LIBS) $(SECP_TEST_LIBS) $(COMMON_LIB)
++endif
++endif
+ endif
+ 
+ TESTS =
+@@ -147,6 +160,10 @@ endif
+ 
+ EXTRA_DIST = autogen.sh src/gen_context.c src/basic-config.h
+ 
++if ENABLE_MODULE_AESNI
++include src/modules/aesni/Makefile.am.include
++endif
++
+ if ENABLE_MODULE_ECDH
+ include src/modules/ecdh/Makefile.am.include
+ endif
+diff --git a/ci/cirrus.sh b/ci/cirrus.sh
+index f223a91..bb0c557 100755
+--- a/ci/cirrus.sh
++++ b/ci/cirrus.sh
+@@ -16,7 +16,7 @@ valgrind --version || true
+     --enable-experimental="$EXPERIMENTAL" \
+     --with-test-override-wide-multiply="$WIDEMUL" --with-bignum="$BIGNUM" --with-asm="$ASM" \
+     --enable-ecmult-static-precomputation="$STATICPRECOMPUTATION" --with-ecmult-gen-precision="$ECMULTGENPRECISION" \
+-    --enable-module-ecdh="$ECDH" --enable-module-recovery="$RECOVERY" \
++    --enable-module-aesni="$AESNI" --enable-module-ecdh="$ECDH" --enable-module-recovery="$RECOVERY" \
+     --enable-module-schnorrsig="$SCHNORRSIG" \
+     --with-valgrind="$WITH_VALGRIND" \
+     --host="$HOST" $EXTRAFLAGS
+@@ -71,6 +71,10 @@ then
+     then
+         $EXEC ./bench_recover >> bench.log 2>&1
+     fi
++    if [ "$AESNI" = "yes" ]
++    then
++        $EXEC ./bench_aesni >> bench.log 2>&1
++    fi
+     if [ "$ECDH" = "yes" ]
+     then
+         $EXEC ./bench_ecdh >> bench.log 2>&1
+diff --git a/configure.ac b/configure.ac
+index fd15d34..6014467 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -75,7 +75,7 @@ case $host_os in
+    ;;
+ esac
+ 
+-CFLAGS="-W $CFLAGS"
++CFLAGS="-W -maes -msse4 $CFLAGS"
+ 
+ warn_CFLAGS="-std=c89 -pedantic -Wall -Wextra -Wcast-align -Wnested-externs -Wshadow -Wstrict-prototypes -Wundef -Wno-unused-function -Wno-long-long -Wno-overlength-strings"
+ saved_CFLAGS="$CFLAGS"
+@@ -135,10 +135,15 @@ AC_ARG_ENABLE(ecmult_static_precomputation,
+     [use_ecmult_static_precomputation=$enableval],
+     [use_ecmult_static_precomputation=auto])
+ 
++AC_ARG_ENABLE(module_aesni,
++    AS_HELP_STRING([--enable-module-aesni],[enable AES-NI based AES-ECB encryption]),
++    [enable_module_aesni=$enableval],
++    [enable_module_aesni=yes])
++
+ AC_ARG_ENABLE(module_ecdh,
+     AS_HELP_STRING([--enable-module-ecdh],[enable ECDH shared secret computation]),
+     [enable_module_ecdh=$enableval],
+-    [enable_module_ecdh=no])
++    [enable_module_ecdh=yes])
+ 
+ AC_ARG_ENABLE(module_recovery,
+     AS_HELP_STRING([--enable-module-recovery],[enable ECDSA pubkey recovery module [default=no]]),
+@@ -482,6 +487,10 @@ fi
+ ### Handle module options
+ ###
+ 
++if test x"$enable_module_aesni" = x"yes"; then
++  AC_DEFINE(ENABLE_MODULE_AESNI, 1, [Define this symbol to enable the AESNI module])
++fi
++
+ if test x"$enable_module_ecdh" = x"yes"; then
+   AC_DEFINE(ENABLE_MODULE_ECDH, 1, [Define this symbol to enable the ECDH module])
+ fi
+@@ -543,6 +552,7 @@ AM_CONDITIONAL([USE_TESTS], [test x"$use_tests" != x"no"])
+ AM_CONDITIONAL([USE_EXHAUSTIVE_TESTS], [test x"$use_exhaustive_tests" != x"no"])
+ AM_CONDITIONAL([USE_BENCHMARK], [test x"$use_benchmark" = x"yes"])
+ AM_CONDITIONAL([USE_ECMULT_STATIC_PRECOMPUTATION], [test x"$set_precomp" = x"yes"])
++AM_CONDITIONAL([ENABLE_MODULE_AESNI], [test x"$enable_module_aesni" = x"yes"])
+ AM_CONDITIONAL([ENABLE_MODULE_ECDH], [test x"$enable_module_ecdh" = x"yes"])
+ AM_CONDITIONAL([ENABLE_MODULE_RECOVERY], [test x"$enable_module_recovery" = x"yes"])
+ AM_CONDITIONAL([ENABLE_MODULE_EXTRAKEYS], [test x"$enable_module_extrakeys" = x"yes"])
+@@ -565,6 +575,7 @@ echo "  with benchmarks         = $use_benchmark"
+ echo "  with tests              = $use_tests"
+ echo "  with openssl tests      = $enable_openssl_tests"
+ echo "  with coverage           = $enable_coverage"
++echo "  module aesni            = $enable_module_aesni"
+ echo "  module ecdh             = $enable_module_ecdh"
+ echo "  module recovery         = $enable_module_recovery"
+ echo "  module extrakeys        = $enable_module_extrakeys"
+diff --git a/include/secp256k1.h b/include/secp256k1.h
+index d368488..7cd3b8c 100644
+--- a/include/secp256k1.h
++++ b/include/secp256k1.h
+@@ -68,6 +68,13 @@ typedef struct {
+     unsigned char data[64];
+ } secp256k1_pubkey;
+ 
++typedef struct {
++    unsigned char *msg_chat;
++    unsigned char *pk_B;
++    unsigned char *sk_A;
++    unsigned char *vk_A;
++} secp256k1_chat_data;
++
+ /** Opaque data structured that holds a parsed ECDSA signature.
+  *
+  *  The exact representation of data inside is implementation defined and not
+@@ -526,6 +533,21 @@ SECP256K1_API int secp256k1_ecdsa_signature_normalize(
+     const secp256k1_ecdsa_signature *sigin
+ ) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(3);
+ 
++/** The implementation of NonceGenChat
++ *
++ * Out: nonce32:    Pointer to the nonce buffer (32 bytes)
++ * In:  msg32:      Pointer to the hash of the message to be signed
++ *      key32:      Pointer to the signing key
++ *      algo16:     NULL
++ *      data:       Pointer to secp256k1_chat_data pointer holding
++ *                  the message to hide and the receivers public key
++ *      attempt:    How many iterations we have tried to find a nonce.
++ *                  This will almost always be 0, but different
++ *                  attempt values are required to result in a different nonce.
++ *
++ */
++SECP256K1_API extern const secp256k1_nonce_function secp256k1_nonce_function_chat;
++
+ /** An implementation of RFC6979 (using HMAC-SHA256) as nonce generation function.
+  * If a data pointer is passed, it is assumed to be a pointer to 32 bytes of
+  * extra entropy.
+diff --git a/include/secp256k1_aesni.h b/include/secp256k1_aesni.h
+new file mode 100644
+index 0000000..d039bba
+--- /dev/null
++++ b/include/secp256k1_aesni.h
+@@ -0,0 +1,112 @@
++#ifndef SECP256K1_AESNI_H
++#define SECP256K1_AESNI_H
++
++#include "secp256k1.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/** Compute the AES 256 key schedule using AES-NI support
++ * 
++ * Out: key:        pointer to an array to be filled with the key schedule
++ * In:  userkey:    pointer to the 32 byte user-provided key used for expansion
++ */
++SECP256K1_API void secp256k1_aesni_256_key_expansion (
++                    unsigned char *key,
++                    const unsigned char *userkey
++) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2);
++
++
++/** Compute the AES inverse key schedule from the key schedule using AES-NI support
++ * 
++ * Out: dec_key:    pointer to an array to be filled with the decryption key schedule
++ * In:  key_sched:  pointer to the key schedule used for encryption
++ *      rounds:     number of AES rounds (10, 12, or 14)
++ */
++SECP256K1_API void secp256k1_aesni_256_dec_key_expansion (
++                    unsigned char *dec_key,
++                    const unsigned char *key_sched
++) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2);
++
++/** Encrypt an AES-ECB plaintext using AES-NI support
++ * 
++ * Out: out:                pointer to the ciphertext buffer
++ * In:  in:                 pointer to the plaintext buffer
++ *      length:             length of the plaintext in bytes
++ *      key:                pointer to the expanded key schedule
++ *      number_of_rounds:   number of AES rounds (10, 12, or 14)
++ * 
++ *  Note - the length of the output buffer out is assumed to be a multiple of 16 bytes
++ */
++SECP256K1_API void secp256k1_aesni_ecb_encrypt (
++                    unsigned char *out,
++                    const unsigned char *in,
++                    unsigned long length,
++                    const unsigned char *key,
++                    int number_of_rounds
++) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(4);
++
++/** Encrypt an AES-CBC plaintext using AES-NI support
++ * 
++ * Out: out:                pointer to the ciphertext buffer
++ * In:  in:                 pointer to the plaintext buffer
++ *      ivec:               pointer to the initialization vector buffer
++ *      length:             length of the plaintext in bytes
++ *      key:                pointer to the expanded key schedule
++ *      number_of_rounds:   number of AES rounds (10, 12, or 14)
++ * 
++ *  Note - the length of the output buffer out is assumed to be a multiple of 16 bytes
++ */
++SECP256K1_API void secp256k1_aesni_cbc_encrypt (
++                    unsigned char *out,
++                    const unsigned char *in,
++                    const unsigned char ivec[16],
++                    unsigned long length,
++                    const unsigned char *key,
++                    int number_of_rounds
++) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(5);
++
++/** Decrypt an AES-ECB ciphertext using AES-NI support
++ * 
++ * Out: out:                pointer to the plaintext buffer
++ * In:  in:                 pointer to the ciphertext buffer
++ *      length:             length of the plaintext in bytes
++ *      key:                pointer to the expanded key schedule
++ *      number_of_rounds:   number of AES rounds (10, 12, or 14)
++ * 
++ *  Note - the length of the output buffer out is assumed to be a multiple of 16 bytes
++ */
++SECP256K1_API void secp256k1_aesni_ecb_decrypt(
++                    unsigned char *out,
++                    const unsigned char *in,
++                    unsigned long length,
++                    const unsigned char *key,
++                    int number_of_rounds
++) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(4);
++
++/** Decrypt an AES-ECB ciphertext using AES-NI support
++ * 
++ * Out: out:                pointer to the plaintext buffer
++ * In:  in:                 pointer to the ciphertext buffer
++ *      ivec:               pointer to the initialization vector buffer
++ *      length:             length of the plaintext in bytes
++ *      key:                pointer to the expanded key schedule
++ *      number_of_rounds:   number of AES rounds (10, 12, or 14)
++ * 
++ *  Note - the length of the output buffer out is assumed to be a multiple of 16 bytes
++ */
++SECP256K1_API void secp256k1_aesni_cbc_decrypt(
++                    unsigned char *out,
++                    const unsigned char *in,
++                    const unsigned char ivec[16],
++                    unsigned long length,
++                    const unsigned char *key,
++                    int number_of_rounds
++) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(5);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* SECP256K1_AESNI_H */
+diff --git a/src/bench_aesni.c b/src/bench_aesni.c
+new file mode 100644
+index 0000000..3f58d1a
+--- /dev/null
++++ b/src/bench_aesni.c
+@@ -0,0 +1,119 @@
++#include <string.h>
++
++#include "include/secp256k1.h"
++#include "include/secp256k1_aesni.h"
++#include "util.h"
++#include "bench.h"
++
++typedef struct {
++    unsigned char key[32];
++    unsigned char ptx[16];
++    unsigned char iv[16];
++    unsigned char ctx_ecb[16];
++    unsigned char ctx_cbc[16];
++} bench_aesni_data_t;
++
++static void bench_aesni_setup(void *arg) {
++    int i;
++    unsigned char arr1[16] = {
++        0x8e, 0xa2, 0xb7, 0xca, 0x51, 0x67, 0x45, 0xbf, 0xea, 0xfc, 0x49, 0x90, 0x4b, 0x49, 0x60, 0x89
++    };
++    unsigned char arr2[16] = {
++        0x0e, 0x23, 0x92, 0xdd, 0x6f, 0x69, 0x0b, 0x44, 0xa5, 0xa1, 0xb4, 0xfd, 0xff, 0x3b, 0x7f, 0x83
++    };
++    bench_aesni_data_t *data = (bench_aesni_data_t *)arg;
++    for (i = 0; i < 32; ++i) {
++        data->key[i] = i;
++        if (i < 16) {
++            data->ptx[i] = (i << 4) + i;
++            data->ctx_ecb[i] = arr1[i];
++            data->ctx_cbc[i] = arr2[i];
++            data->iv[i] = i + 16;
++        }
++    }
++}
++
++static void bench_aesni_enc_key_expansion(void *arg, int iters) {
++    int i;
++    unsigned char key[15*16];
++    bench_aesni_data_t *data = (bench_aesni_data_t *)arg;
++    for (i = 0; i < iters; ++i) {
++        secp256k1_aesni_256_key_expansion(key, data->key);
++    }
++}
++
++static void bench_aesni_dec_key_expansion(void *arg, int iters) {
++    int i;
++    unsigned char tmp[15*16];
++    unsigned char key[15*16];
++    bench_aesni_data_t *data = (bench_aesni_data_t *)arg;
++    for (i = 0; i < iters; ++i) {
++        secp256k1_aesni_256_key_expansion(tmp, data->key);
++        secp256k1_aesni_256_dec_key_expansion(key, tmp);
++    }
++}
++
++static void bench_aesni_enc_ecb(void *arg, int iters) {
++    int i;
++    unsigned char res[16];
++    unsigned char key[15*16];
++    bench_aesni_data_t *data = (bench_aesni_data_t *)arg;
++    for (i = 0; i < iters; ++i) {
++        secp256k1_aesni_256_key_expansion(key, data->key);
++        secp256k1_aesni_ecb_decrypt(res, data->ptx, 16, key, 14);
++    }
++}
++
++static void bench_aesni_dec_ecb(void *arg, int iters) {
++    int i;
++    unsigned char res[16];
++    unsigned char key[15*16];
++    unsigned char tmp[15*16];
++    bench_aesni_data_t *data = (bench_aesni_data_t *)arg;
++    for (i = 0; i < iters; ++i) {
++        secp256k1_aesni_256_key_expansion(tmp, data->key);
++        secp256k1_aesni_256_dec_key_expansion(key, tmp);
++        secp256k1_aesni_ecb_decrypt(res, data->ctx_ecb, 16, key, 14);
++    }
++}
++
++static void bench_aesni_enc_cbc(void *arg, int iters) {
++    int i;
++    unsigned char res[16];
++    unsigned char key[15*16];
++    bench_aesni_data_t *data = (bench_aesni_data_t *)arg;
++    for (i = 0; i < iters; ++i) {
++        secp256k1_aesni_256_key_expansion(key, data->key);
++        secp256k1_aesni_cbc_decrypt(res, data->ptx, data->iv, 16, key, 14);
++    }
++}
++
++static void bench_aesni_dec_cbc(void *arg, int iters) {
++    int i;
++    unsigned char res[16];
++    unsigned char key[15*16];
++    unsigned char tmp[15*16];
++    bench_aesni_data_t *data = (bench_aesni_data_t *)arg;
++    for (i = 0; i < iters; ++i) {
++        secp256k1_aesni_256_key_expansion(tmp, data->key);
++        secp256k1_aesni_256_dec_key_expansion(key, tmp);
++        secp256k1_aesni_cbc_decrypt(res, data->ctx_cbc, data->iv, 16, key, 14);
++    }
++}
++
++int main(void) {
++    bench_aesni_data_t data;
++
++    int iters = get_iters(20000);
++
++    run_benchmark("aesni-enc-keyexp", bench_aesni_enc_key_expansion, bench_aesni_setup, NULL, &data, 10, iters);
++    run_benchmark("aesni-dec-keyexp", bench_aesni_dec_key_expansion, bench_aesni_setup, NULL, &data, 10, iters);
++
++    run_benchmark("aesni-enc-ecb", bench_aesni_enc_ecb, bench_aesni_setup, NULL, &data, 10, iters);
++    run_benchmark("aesni-dec-ecb", bench_aesni_enc_ecb, bench_aesni_setup, NULL, &data, 10, iters);
++
++    run_benchmark("aesni-enc-cbc", bench_aesni_enc_cbc, bench_aesni_setup, NULL, &data, 10, iters);
++    run_benchmark("aesni-dec-cbc", bench_aesni_enc_cbc, bench_aesni_setup, NULL, &data, 10, iters);
++
++    return 0;
++}
+\ No newline at end of file
+diff --git a/src/bench_ecdsa_sign.c b/src/bench_ecdsa_sign.c
+new file mode 100644
+index 0000000..9de3d4f
+--- /dev/null
++++ b/src/bench_ecdsa_sign.c
+@@ -0,0 +1,86 @@
++#include <string.h>
++
++#include "include/secp256k1.h"
++#include "util.h"
++#include "bench.h"
++
++typedef struct {
++    secp256k1_context *ctx;
++    unsigned char msg32[32];
++    unsigned char key32[32];
++    secp256k1_chat_data *chat;
++} bench_ecdsa_sign_data_t;
++
++static void bench_ecdsa_sign_setup(void *arg) {
++    unsigned int i;
++    bench_ecdsa_sign_data_t *bench_data;
++    unsigned char pk[33] = {
++        0x02,
++        0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac,
++        0x55, 0xa0, 0x62, 0x95, 0xce, 0x87, 0x0b, 0x07,
++        0x02, 0x9b, 0xfc, 0xdb, 0x2d, 0xce, 0x28, 0xd9,
++        0x59, 0xf2, 0x81, 0x5b, 0x16, 0xf8, 0x17, 0x98
++    };
++
++    bench_data = (bench_ecdsa_sign_data_t *)arg;
++    bench_data->ctx = secp256k1_context_create(SECP256K1_CONTEXT_SIGN);
++    bench_data->chat = calloc(1, sizeof(secp256k1_chat_data));
++    bench_data->chat->msg_chat = calloc(32, sizeof(unsigned char));
++    bench_data->chat->pk_B = calloc(33, sizeof(unsigned char));
++    bench_data->chat->sk_A = calloc(32, sizeof(unsigned char));
++    bench_data->chat->vk_A = calloc(33, sizeof(unsigned char));
++    for (i = 0; i < 32; ++i) {
++        bench_data->msg32[i] = i;
++        bench_data->key32[i] = i;
++        bench_data->chat->msg_chat[i] = i;
++        bench_data->chat->pk_B[i] = pk[i];
++        bench_data->chat->sk_A[i] = pk[i+1];
++        bench_data->chat->vk_A[i] = pk[i];
++    }
++    bench_data->chat->pk_B[32] = pk[32];
++    bench_data->chat->vk_A[32] = pk[32];
++}
++
++static void bench_ecdsa_sign_cleanup(void *arg, int iters) {
++    bench_ecdsa_sign_data_t *bench_data;
++    (void)iters;
++    bench_data = (bench_ecdsa_sign_data_t *)arg;
++    secp256k1_context_destroy(bench_data->ctx);
++    free(bench_data->chat->vk_A);
++    free(bench_data->chat->sk_A);
++    free(bench_data->chat->pk_B);
++    free(bench_data->chat->msg_chat);
++    free(bench_data->chat);
++}
++
++static void bench_ecdsa_sign_rfc6979(void *arg, int iters) {
++    int i;
++    secp256k1_ecdsa_signature sig;
++    bench_ecdsa_sign_data_t *data;
++    data = (bench_ecdsa_sign_data_t *)arg;
++    for (i = 0; i < iters; ++i) {
++        CHECK(secp256k1_ecdsa_sign(data->ctx, &sig, data->msg32, data->key32, secp256k1_nonce_function_rfc6979, NULL) == 1);
++    }
++}
++
++static void bench_ecdsa_sign_chat(void *arg, int iters) {
++    int i;
++    secp256k1_ecdsa_signature sig;
++    bench_ecdsa_sign_data_t *data;
++    data = (bench_ecdsa_sign_data_t *)arg;
++    for (i = 0; i < iters; ++i) {
++        CHECK(secp256k1_ecdsa_sign(data->ctx, &sig, data->msg32, data->key32, secp256k1_nonce_function_chat, data->chat) == 1);
++    }
++}
++
++int main(void) {
++    bench_ecdsa_sign_data_t data;
++    int iters;
++
++    iters = get_iters(20000);
++    run_benchmark("sign-ecdsa-w-rfc6979", bench_ecdsa_sign_rfc6979, bench_ecdsa_sign_setup, bench_ecdsa_sign_cleanup, &data, 10, iters);
++
++    run_benchmark("sign-chat", bench_ecdsa_sign_chat, bench_ecdsa_sign_setup, bench_ecdsa_sign_cleanup, &data, 10, iters);
++
++    return 0;
++}
+diff --git a/src/bench_nonceGen.c b/src/bench_nonceGen.c
+new file mode 100644
+index 0000000..e8d19a9
+--- /dev/null
++++ b/src/bench_nonceGen.c
+@@ -0,0 +1,86 @@
++#include <string.h>
++
++#include "include/secp256k1.h"
++#include "util.h"
++#include "bench.h"
++
++typedef struct {
++    unsigned char msg32[32];
++    unsigned char key32[32];
++    secp256k1_chat_data *data;
++    unsigned int attempt;
++} bench_nonceGen_data_t;
++
++static void bench_nonceGen_setup(void *arg) {
++    unsigned int i;
++    unsigned char pk[33] = {
++        0x02,
++        0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac,
++        0x55, 0xa0, 0x62, 0x95, 0xce, 0x87, 0x0b, 0x07,
++        0x02, 0x9b, 0xfc, 0xdb, 0x2d, 0xce, 0x28, 0xd9,
++        0x59, 0xf2, 0x81, 0x5b, 0x16, 0xf8, 0x17, 0x98
++    };
++    bench_nonceGen_data_t *bench_data;
++
++    bench_data = (bench_nonceGen_data_t *)arg;
++    bench_data->data = calloc(1, sizeof(secp256k1_chat_data));
++    bench_data->data->msg_chat = calloc(32, sizeof(unsigned char));
++    bench_data->data->pk_B = calloc(33, sizeof(unsigned char));
++    bench_data->data->sk_A = calloc(32, sizeof(unsigned char));
++    bench_data->data->vk_A = calloc(33, sizeof(unsigned char));
++    for (i = 0; i < 32; ++i) {
++        bench_data->msg32[i] = i;
++        bench_data->key32[i] = i;
++        bench_data->data->msg_chat[i] = i;
++        bench_data->data->pk_B[i] = pk[i];
++        bench_data->data->sk_A[i] = pk[i+1];
++        bench_data->data->vk_A[i] = pk[i];
++        bench_data->attempt = 0;
++    }
++    bench_data->data->pk_B[32] = pk[32];
++    bench_data->data->vk_A[32] = pk[32];
++}
++
++static void bench_nonceGen_cleanup(void *arg, int iters) {
++    bench_nonceGen_data_t *bench_data;
++    (void)iters;
++    bench_data = (bench_nonceGen_data_t *)arg;
++    free(bench_data->data->vk_A);
++    free(bench_data->data->sk_A);
++    free(bench_data->data->pk_B);
++    free(bench_data->data->msg_chat);
++    free(bench_data->data);
++}
++
++static void bench_nonceGenRfc6979(void *arg, int iters) {
++    int i;
++    unsigned char nonce[32];
++    bench_nonceGen_data_t *data;
++    data = (bench_nonceGen_data_t *)arg;
++    for (i = 0; i < iters; ++i) {
++        CHECK(secp256k1_nonce_function_rfc6979(nonce, data->msg32, data->key32, NULL, NULL, data->attempt) == 1);
++    }
++}
++
++static void bench_nonceGenChat(void *arg, int iters) {
++    int i;
++    unsigned char nonce[32];
++    bench_nonceGen_data_t *data;
++    data = (bench_nonceGen_data_t *)arg;
++    for (i = 0; i < iters; ++i) {
++        CHECK(secp256k1_nonce_function_chat(nonce, data->msg32, data->key32, NULL, data->data, data->attempt) == 1);
++    }
++}
++
++int main(void) {
++    bench_nonceGen_data_t data;
++    int iters;
++
++    iters = get_iters(20000);
++
++    run_benchmark("nonceGenRfc6979", bench_nonceGenRfc6979, bench_nonceGen_setup, bench_nonceGen_cleanup, &data, 10, iters);
++
++    run_benchmark("nonceGenChat", bench_nonceGenChat, bench_nonceGen_setup, bench_nonceGen_cleanup, &data, 10, iters);
++
++    return 0;
++}
+diff --git a/src/bench_sha256.c b/src/bench_sha256.c
+new file mode 100644
+index 0000000..1b1ee8c
+--- /dev/null
++++ b/src/bench_sha256.c
+@@ -0,0 +1,45 @@
++#include <string.h>
++
++#include "include/secp256k1.h"
++#include "hash_impl.h"
++#include "util.h"
++#include "bench.h"
++
++typedef struct {
++    secp256k1_sha256 hash;
++    unsigned char data1[32];
++    unsigned char data2[33];
++} bench_sha256_data_t;
++
++static void bench_sha256_setup(void *arg) {
++    int i;
++    bench_sha256_data_t *data = (bench_sha256_data_t *)arg;
++    for (i = 0; i < 33; ++i) {
++        data->data2[i] = 32 - i;
++        if (i < 32) {
++            data->data1[i] = i + 1;
++        }
++    }
++}
++
++static void bench_sha256(void *arg, int iters) {
++    int i;
++    unsigned char out[32];
++    bench_sha256_data_t *data = (bench_sha256_data_t *)arg;
++    for (i = 0; i < iters; ++i) {
++        secp256k1_sha256_initialize(&data->hash);
++        secp256k1_sha256_write(&data->hash, data->data1, 32);
++        secp256k1_sha256_write(&data->hash, data->data2, 33);
++        secp256k1_sha256_finalize(&data->hash, out);
++    }
++}
++
++int main(void) {
++    bench_sha256_data_t data;
++
++    int iters = get_iters(20000);
++
++    run_benchmark("sha256", bench_sha256, bench_sha256_setup, NULL, &data, 10, iters);
++
++    return 0;
++}
+\ No newline at end of file
+diff --git a/src/modules/aesni/Makefile.am.include b/src/modules/aesni/Makefile.am.include
+new file mode 100644
+index 0000000..955f7d1
+--- /dev/null
++++ b/src/modules/aesni/Makefile.am.include
+@@ -0,0 +1,8 @@
++include_HEADERS += include/secp256k1_aesni.h
++noinst_HEADERS += src/modules/aesni/main_impl.h
++noinst_HEADERS += src/modules/aesni/tests_impl.h
++if USE_BENCHMARK
++noinst_PROGRAMS += bench_aesni
++bench_aesni_SOURCES = src/bench_aesni.c
++bench_aesni_LDADD = libsecp256k1.la $(SECP_LIBS) $(COMMON_LIB)
++endif
+diff --git a/src/modules/aesni/main_impl.h b/src/modules/aesni/main_impl.h
+new file mode 100644
+index 0000000..2ee8205
+--- /dev/null
++++ b/src/modules/aesni/main_impl.h
+@@ -0,0 +1,209 @@
++#ifndef SECP256K1_MODULE_AESNI_MAIN_H
++#define SECP256K1_MODULE_AESNI_MAIN_H
++
++#include "include/secp256k1_aesni.h"
++
++/**************************************************************/
++/****************** AES-NI SECTION START **********************/
++/**************************************************************/
++/* see https://www.intel.com/content/dam/doc/white-paper/advanced-encryption-standard-new-instructions-set-paper.pdf */
++
++#include <wmmintrin.h>
++
++/*******************************/
++/**        KEY SCHEDULE       **/
++/*******************************/
++__inline void secp256k1_aesni_key_256_assist_1 (__m128i *temp1, __m128i *temp2) {
++    __m128i temp4;
++    *temp2 = _mm_shuffle_epi32(*temp2, 0xff);
++    temp4 = _mm_slli_si128(*temp1, 0x4);
++    *temp1 = _mm_xor_si128(*temp1, temp4);
++    temp4 = _mm_slli_si128(temp4, 0x4);
++    *temp1 = _mm_xor_si128(*temp1, temp4);
++    temp4 = _mm_slli_si128(temp4, 0x4);
++    *temp1 = _mm_xor_si128(*temp1, temp4);
++    *temp1 = _mm_xor_si128(*temp1, *temp2);
++}
++__inline void secp256k1_aesni_key_256_assist_2 (__m128i *temp1, __m128i *temp3) {
++    __m128i temp2, temp4;
++    temp4 = _mm_aeskeygenassist_si128(*temp1, 0x0);
++    temp2 = _mm_shuffle_epi32(temp4, 0xaa);
++    temp4 = _mm_slli_si128(*temp3, 0x4);
++    *temp3 = _mm_xor_si128(*temp3, temp4);
++    temp4 = _mm_slli_si128(temp4, 0x4);
++    *temp3 = _mm_xor_si128(*temp3, temp4);
++    temp4 = _mm_slli_si128(temp4, 0x4);
++    *temp3 = _mm_xor_si128(*temp3, temp4);
++    *temp3 = _mm_xor_si128(*temp3, temp2);
++}
++
++void secp256k1_aesni_256_key_expansion (unsigned char *key, const unsigned char *userkey) {
++    __m128i temp1, temp2, temp3;
++    __m128i *Key_Schedule = (__m128i*)key;
++    temp1 = _mm_loadu_si128((__m128i*)userkey);
++    temp3 = _mm_loadu_si128((__m128i*)(userkey + 16));
++    Key_Schedule[0] = temp1;
++    Key_Schedule[1] = temp3;
++    temp2 = _mm_aeskeygenassist_si128(temp3, 0x01);
++    secp256k1_aesni_key_256_assist_1(&temp1, &temp2);
++    Key_Schedule[2] = temp1;
++    secp256k1_aesni_key_256_assist_2(&temp1, &temp3);
++    Key_Schedule[3] = temp3;
++    temp2 = _mm_aeskeygenassist_si128(temp3, 0x02);
++    secp256k1_aesni_key_256_assist_1(&temp1, &temp2);
++    Key_Schedule[4] = temp1;
++    secp256k1_aesni_key_256_assist_2(&temp1, &temp3);
++    Key_Schedule[5] = temp3;
++    temp2 = _mm_aeskeygenassist_si128(temp3, 0x04);
++    secp256k1_aesni_key_256_assist_1(&temp1, &temp2);
++    Key_Schedule[6] = temp1;
++    secp256k1_aesni_key_256_assist_2(&temp1, &temp3);
++    Key_Schedule[7] = temp3;
++    temp2 = _mm_aeskeygenassist_si128(temp3, 0x08);
++    secp256k1_aesni_key_256_assist_1(&temp1, &temp2);
++    Key_Schedule[8] = temp1;
++    secp256k1_aesni_key_256_assist_2(&temp1, &temp3);
++    Key_Schedule[9] = temp3;
++    temp2 = _mm_aeskeygenassist_si128(temp3, 0x10);
++    secp256k1_aesni_key_256_assist_1(&temp1, &temp2);
++    Key_Schedule[10] = temp1;
++    secp256k1_aesni_key_256_assist_2(&temp1, &temp3);
++    Key_Schedule[11] = temp3;
++    temp2 = _mm_aeskeygenassist_si128(temp3, 0x20);
++    secp256k1_aesni_key_256_assist_1(&temp1, &temp2);
++    Key_Schedule[12] = temp1;
++    secp256k1_aesni_key_256_assist_2(&temp1, &temp3);
++    Key_Schedule[13] = temp3;
++    temp2 = _mm_aeskeygenassist_si128(temp3, 0x40);
++    secp256k1_aesni_key_256_assist_1(&temp1, &temp2);
++    Key_Schedule[14] = temp1;
++}
++
++void secp256k1_aesni_256_dec_key_expansion (unsigned char *dec_key, const unsigned char *key_sched) {
++    #define ROUNDS 14
++    int i;
++    __m128i tmp;
++    _mm_storeu_si128(&((__m128i*)dec_key)[0], ((__m128i*)key_sched)[ROUNDS]);
++    for (i = 1; i < ROUNDS; ++i) {
++        tmp = _mm_aesimc_si128(((__m128i*)key_sched)[ROUNDS-i]);
++        _mm_storeu_si128(&((__m128i*)dec_key)[i], tmp);
++    }
++    _mm_storeu_si128(&((__m128i*)dec_key)[ROUNDS], ((__m128i*)key_sched)[0]);
++    #undef ROUNDS
++}
++
++/*******************************/
++/**        ENCRYPTION         **/
++/*******************************/
++/* Note – the length of the output buffer is assumed to be a multiple of 16 bytes */
++void secp256k1_aesni_ecb_encrypt (
++                    unsigned char *out,       /* pointer to the CIPHERTEXT buffer     */
++                    const unsigned char *in,  /* pointer to the PLAINTEXT             */
++                    unsigned long length,     /* text length in bytes                 */
++                    const unsigned char *key, /* pointer to the expanded key schedule */
++                    int number_of_rounds)     /* number of AES rounds 10, 12, or 14   */
++{
++    __m128i tmp;
++    unsigned long i;
++    int j;
++    if (length % 16)
++        length = length / 16 + 1;
++    else
++        length = length / 16;
++    for (i = 0; i < length; ++i) {
++        tmp = _mm_loadu_si128(&((__m128i*)in)[i]);
++        tmp = _mm_xor_si128(tmp, ((__m128i*)key)[0]);
++        for (j = 1; j < number_of_rounds; ++j)
++            tmp = _mm_aesenc_si128(tmp, ((__m128i*)key)[j]);
++        tmp = _mm_aesenclast_si128(tmp, ((__m128i*)key)[j]);
++        _mm_storeu_si128(&((__m128i*)out)[i], tmp);
++    }
++}
++
++/* Note – the length of the output buffer is assumed to be a multiple of 16 bytes */
++void secp256k1_aesni_cbc_encrypt (
++                    unsigned char *out,             /* pointer to the CIPHERTEXT buffer     */
++                    const unsigned char *in,        /* pointer to the PLAINTEXT             */
++                    const unsigned char ivec[16],   /* pointer to the IV                    */
++                    unsigned long length,           /* text length in bytes                 */
++                    const unsigned char *key,       /* pointer to the expanded key schedule */
++                    int number_of_rounds)           /* number of AES rounds 10, 12, or 14   */
++{
++    __m128i feedback,data;
++    unsigned long i;
++    int j;
++    if (length % 16)
++        length = length / 16 + 1;
++    else
++        length = length / 16;
++    feedback = _mm_loadu_si128((__m128i*)ivec);
++    for (i = 0; i < length; ++i) {
++        data = _mm_loadu_si128(&((__m128i*)in)[i]);
++        feedback = _mm_xor_si128(data,feedback);
++        feedback = _mm_xor_si128(feedback, ((__m128i*)key)[0]);
++        for (j = 1; j < number_of_rounds; ++j)
++            feedback = _mm_aesenc_si128(feedback, ((__m128i*)key)[j]);
++        feedback = _mm_aesenclast_si128(feedback, ((__m128i*)key)[j]);
++        _mm_storeu_si128(&((__m128i*)out)[i], feedback);
++    }
++}
++
++/*******************************/
++/**        DECRYPTION         **/
++/*******************************/
++void secp256k1_aesni_ecb_decrypt(
++                    unsigned char *out,       /* pointer to the DECRYPTED TEXT buffer */
++                    const unsigned char *in,  /* pointer to the CIPHERTEXT            */
++                    unsigned long length,     /* text length in bytes                 */
++                    const unsigned char *key, /* pointer to the expanded key schedule */
++                    int number_of_rounds)     /* number of AES rounds 10, 12, or 14   */
++{
++    __m128i tmp;
++    unsigned long i;
++    int j;
++    if (length % 16)
++        length = length / 16 + 1;
++    else
++        length = length / 16;
++    for (i = 0; i < length; i++) {
++        tmp = _mm_loadu_si128(&((__m128i*)in)[i]);
++        tmp = _mm_xor_si128(tmp, ((__m128i*)key)[0]);
++        for (j = 1; j < number_of_rounds; j++)
++            tmp = _mm_aesdec_si128(tmp, ((__m128i*)key)[j]);
++        tmp = _mm_aesdeclast_si128(tmp, ((__m128i*)key)[j]);
++        _mm_storeu_si128(&((__m128i*)out)[i], tmp);
++    }
++}
++
++void secp256k1_aesni_cbc_decrypt(
++                    unsigned char *out,             /* pointer to the DECRYPTED TEXT buffer */
++                    const unsigned char *in,        /* pointer to the CIPHERTEXT            */
++                    const unsigned char ivec[16],   /* pointer to the IV                    */
++                    unsigned long length,           /* text length in bytes                 */
++                    const unsigned char *key,       /* pointer to the expanded key schedule */
++                    int number_of_rounds)           /* number of AES rounds 10, 12, or 14   */
++{
++    __m128i data, feedback, last_in;
++    unsigned long i;
++    int j;
++    if (length % 16)
++        length = length / 16 + 1;
++    else
++        length = length / 16;
++    feedback = _mm_loadu_si128((__m128i*)ivec);
++    for (i = 0; i < length; ++i) {
++        last_in = _mm_loadu_si128(&((__m128i*)in)[i]);
++        data = _mm_xor_si128(last_in, ((__m128i*)key)[0]);
++        for (j = 1; j < number_of_rounds; ++j) 
++            data = _mm_aesdec_si128(data, ((__m128i*)key)[j]);
++        data = _mm_aesdeclast_si128(data, ((__m128i*)key)[j]);
++        data = _mm_xor_si128(data, feedback);
++        _mm_storeu_si128(&((__m128i*)out)[i], data);
++        feedback = last_in;
++    }
++}
++/**************************************************************/
++/****************** AES-NI SECTION END ************************/
++/**************************************************************/
++
++#endif /* SECP256K1_MODULE_AESNI_MAIN_H */
+diff --git a/src/modules/aesni/tests_impl.h b/src/modules/aesni/tests_impl.h
+new file mode 100644
+index 0000000..4d6e13f
+--- /dev/null
++++ b/src/modules/aesni/tests_impl.h
+@@ -0,0 +1,127 @@
++#ifndef SECP256K1_MODULE_AESNI_TESTS_H
++#define SECP256K1_MODULE_AESNI_TESTS_H
++
++typedef struct {
++    unsigned char userkey[32];
++    unsigned char enckey[15*16];
++    unsigned char deckey[15*16];
++    unsigned char iv[16];
++    unsigned char pt[16];
++    unsigned char ecb_ct[16];
++    unsigned char cbc_ct[16];
++} bench_aesni_data_t;
++
++void test_aesni_setup(bench_aesni_data_t *data) {
++    long unsigned int i;
++    unsigned char arr1[16] = {
++        0x8e, 0xa2, 0xb7, 0xca, 0x51, 0x67, 0x45, 0xbf, 0xea, 0xfc, 0x49, 0x90, 0x4b, 0x49, 0x60, 0x89
++    };
++    unsigned char arr2[16] = {
++        0x0e, 0x23, 0x92, 0xdd, 0x6f, 0x69, 0x0b, 0x44, 0xa5, 0xa1, 0xb4, 0xfd, 0xff, 0x3b, 0x7f, 0x83
++    };
++    unsigned char arr3[15*16] = {
++        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
++        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
++        0xa5, 0x73, 0xc2, 0x9f, 0xa1, 0x76, 0xc4, 0x98, 0xa9, 0x7f, 0xce, 0x93, 0xa5, 0x72, 0xc0, 0x9c,
++        0x16, 0x51, 0xa8, 0xcd, 0x02, 0x44, 0xbe, 0xda, 0x1a, 0x5d, 0xa4, 0xc1, 0x06, 0x40, 0xba, 0xde,
++        0xae, 0x87, 0xdf, 0xf0, 0x0f, 0xf1, 0x1b, 0x68, 0xa6, 0x8e, 0xd5, 0xfb, 0x03, 0xfc, 0x15, 0x67,
++        0x6d, 0xe1, 0xf1, 0x48, 0x6f, 0xa5, 0x4f, 0x92, 0x75, 0xf8, 0xeb, 0x53, 0x73, 0xb8, 0x51, 0x8d,
++        0xc6, 0x56, 0x82, 0x7f, 0xc9, 0xa7, 0x99, 0x17, 0x6f, 0x29, 0x4c, 0xec, 0x6c, 0xd5, 0x59, 0x8b,
++        0x3d, 0xe2, 0x3a, 0x75, 0x52, 0x47, 0x75, 0xe7, 0x27, 0xbf, 0x9e, 0xb4, 0x54, 0x07, 0xcf, 0x39,
++        0x0b, 0xdc, 0x90, 0x5f, 0xc2, 0x7b, 0x09, 0x48, 0xad, 0x52, 0x45, 0xa4, 0xc1, 0x87, 0x1c, 0x2f,
++        0x45, 0xf5, 0xa6, 0x60, 0x17, 0xb2, 0xd3, 0x87, 0x30, 0x0d, 0x4d, 0x33, 0x64, 0x0a, 0x82, 0x0a,
++        0x7c, 0xcf, 0xf7, 0x1c, 0xbe, 0xb4, 0xfe, 0x54, 0x13, 0xe6, 0xbb, 0xf0, 0xd2, 0x61, 0xa7, 0xdf,
++        0xf0, 0x1a, 0xfa, 0xfe, 0xe7, 0xa8, 0x29, 0x79, 0xd7, 0xa5, 0x64, 0x4a, 0xb3, 0xaf, 0xe6, 0x40,
++        0x25, 0x41, 0xfe, 0x71, 0x9b, 0xf5, 0x00, 0x25, 0x88, 0x13, 0xbb, 0xd5, 0x5a, 0x72, 0x1c, 0x0a,
++        0x4e, 0x5a, 0x66, 0x99, 0xa9, 0xf2, 0x4f, 0xe0, 0x7e, 0x57, 0x2b, 0xaa, 0xcd, 0xf8, 0xcd, 0xea,
++        0x24, 0xfc, 0x79, 0xcc, 0xbf, 0x09, 0x79, 0xe9, 0x37, 0x1a, 0xc2, 0x3c, 0x6d, 0x68, 0xde, 0x36
++    };
++    unsigned char arr4[15*16] = {
++        0x24, 0xfc, 0x79, 0xcc, 0xbf, 0x09, 0x79, 0xe9, 0x37, 0x1a, 0xc2, 0x3c, 0x6d, 0x68, 0xde, 0x36,
++        0x34, 0xf1, 0xd1, 0xff, 0xbf, 0xce, 0xaa, 0x2f, 0xfc, 0xe9, 0xe2, 0x5f, 0x25, 0x58, 0x01, 0x6e,
++        0x5e, 0x16, 0x48, 0xeb, 0x38, 0x4c, 0x35, 0x0a, 0x75, 0x71, 0xb7, 0x46, 0xdc, 0x80, 0xe6, 0x84,
++        0xc8, 0xa3, 0x05, 0x80, 0x8b, 0x3f, 0x7b, 0xd0, 0x43, 0x27, 0x48, 0x70, 0xd9, 0xb1, 0xe3, 0x31,
++        0xb5, 0x70, 0x8e, 0x13, 0x66, 0x5a, 0x7d, 0xe1, 0x4d, 0x3d, 0x82, 0x4c, 0xa9, 0xf1, 0x51, 0xc2,
++        0x74, 0xda, 0x7b, 0xa3, 0x43, 0x9c, 0x7e, 0x50, 0xc8, 0x18, 0x33, 0xa0, 0x9a, 0x96, 0xab, 0x41,
++        0x3c, 0xa6, 0x97, 0x15, 0xd3, 0x2a, 0xf3, 0xf2, 0x2b, 0x67, 0xff, 0xad, 0xe4, 0xcc, 0xd3, 0x8e,
++        0xf8, 0x5f, 0xc4, 0xf3, 0x37, 0x46, 0x05, 0xf3, 0x8b, 0x84, 0x4d, 0xf0, 0x52, 0x8e, 0x98, 0xe1,
++        0xde, 0x69, 0x40, 0x9a, 0xef, 0x8c, 0x64, 0xe7, 0xf8, 0x4d, 0x0c, 0x5f, 0xcf, 0xab, 0x2c, 0x23,
++        0xae, 0xd5, 0x58, 0x16, 0xcf, 0x19, 0xc1, 0x00, 0xbc, 0xc2, 0x48, 0x03, 0xd9, 0x0a, 0xd5, 0x11,
++        0x15, 0xc6, 0x68, 0xbd, 0x31, 0xe5, 0x24, 0x7d, 0x17, 0xc1, 0x68, 0xb8, 0x37, 0xe6, 0x20, 0x7c,
++        0x7f, 0xd7, 0x85, 0x0f, 0x61, 0xcc, 0x99, 0x16, 0x73, 0xdb, 0x89, 0x03, 0x65, 0xc8, 0x9d, 0x12,
++        0x2a, 0x28, 0x40, 0xc9, 0x24, 0x23, 0x4c, 0xc0, 0x26, 0x24, 0x4c, 0xc5, 0x20, 0x27, 0x48, 0xc4,
++        0x1a, 0x1f, 0x18, 0x1d, 0x1e, 0x1b, 0x1c, 0x19, 0x12, 0x17, 0x10, 0x15, 0x16, 0x13, 0x14, 0x11,
++        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f
++    };
++    for (i = 0; i < sizeof(arr2); ++i) {
++        data->enckey[i] = arr3[i];
++        data->deckey[i] = arr4[i];
++        if (i < 32) {
++            data->userkey[i] = i;
++            if (i < 16) {
++                data->pt[i] = (i << 4) + i;
++                data->ecb_ct[i] = arr1[i];
++                data->cbc_ct[i] = arr2[i];
++                data->iv[i] = i + 16;
++            }
++        }
++    }
++}
++
++void test_aesni_key_schedule(void) {
++    unsigned char enckey[15*16];
++    unsigned char deckey[15*16];
++    bench_aesni_data_t data;
++    test_aesni_setup(&data);
++
++    secp256k1_aesni_256_key_expansion(enckey, data.userkey);
++    secp256k1_aesni_256_dec_key_expansion(deckey, data.enckey);
++    CHECK(secp256k1_memcmp_var(enckey, data.enckey, 15*16) == 0);
++    CHECK(secp256k1_memcmp_var(deckey, data.deckey, 15*16) == 0);
++}
++
++void test_aesni_ecb_encryption(void) {
++    unsigned char ct[16];
++    bench_aesni_data_t data;
++    test_aesni_setup(&data);
++
++    secp256k1_aesni_ecb_encrypt(ct, data.pt, 16, data.enckey, 14);
++    CHECK(secp256k1_memcmp_var(ct, data.ecb_ct, 16) == 0);
++}
++
++void test_aesni_cbc_encryption(void) {
++    unsigned char ct[16];
++    bench_aesni_data_t data;
++    test_aesni_setup(&data);
++
++    secp256k1_aesni_cbc_encrypt(ct, data.pt, data.iv, 16, data.enckey, 14);
++    CHECK(secp256k1_memcmp_var(ct, data.cbc_ct, 16) == 0);
++}
++
++void test_aesni_ecb_decryption(void) {
++    unsigned char pt[16];
++    bench_aesni_data_t data;
++    test_aesni_setup(&data);
++
++    secp256k1_aesni_ecb_decrypt(pt, data.ecb_ct, 16, data.deckey, 14);
++    CHECK(secp256k1_memcmp_var(pt, data.pt, 16) == 0);
++}
++
++void test_aesni_cbc_decryption(void) {
++    unsigned char pt[16];
++    bench_aesni_data_t data;
++    test_aesni_setup(&data);
++
++    secp256k1_aesni_ecb_decrypt(pt, data.cbc_ct, 16, data.deckey, 14);
++    CHECK(secp256k1_memcmp_var(pt, data.pt, 16) == 0);
++}
++
++void run_aesni_tests(void) {
++    test_aesni_key_schedule();
++    test_aesni_ecb_encryption();
++    test_aesni_cbc_encryption();
++    test_aesni_ecb_decryption();
++    test_aesni_cbc_decryption();
++}
++
++#endif /* SECP256K1_MODULE_AESNI_TESTS_H */
+diff --git a/src/secp256k1.c b/src/secp256k1.c
+index 4f56c27..7b6b625 100644
+--- a/src/secp256k1.c
++++ b/src/secp256k1.c
+@@ -444,6 +444,90 @@ static SECP256K1_INLINE void buffer_append(unsigned char *buf, unsigned int *off
+     *offset += len;
+ }
+ 
++/* NonceGenChat implementation */
++#ifdef ENABLE_MODULE_AESNI
++#ifdef ENABLE_MODULE_ECDH
++#include "include/secp256k1_aesni.h"
++#include "include/secp256k1_ecdh.h"
++#define AES_ROUNDS 14
++#define AES_BLOCKSIZE 16
++static int nonce_function_chat(unsigned char *nonce32, const unsigned char *msg32, const unsigned char *sk32, const unsigned char *algo16, void *data, unsigned int counter) {
++    /* Inputs as defined in the paper's NonceGenChat function */
++    const unsigned char *sk_A, *msg_chat, *vk_A;
++    secp256k1_pubkey pk_B;
++    /* Output as in the NonceGenChat function in the paper */
++    unsigned char iv[32];
++    unsigned char k_chat[32];
++    unsigned char ctx_chat[32];
++
++    /* Helper variables */
++    unsigned int i;
++    secp256k1_chat_data *chat_data;
++    secp256k1_sha256 sha;
++    secp256k1_context *ctx;
++    unsigned char key_exp[(AES_ROUNDS+1)*AES_BLOCKSIZE];
++    (void)algo16; /* Removes "unused variable" warning */
++    (void)sk32;
++
++    /* Prepare */
++    ctx = secp256k1_context_create(SECP256K1_CONTEXT_NONE);
++    chat_data = (secp256k1_chat_data *)data;
++    sk_A = chat_data->sk_A;
++    msg_chat = chat_data->msg_chat;
++    vk_A = chat_data->vk_A;
++    if (!secp256k1_ec_pubkey_parse(ctx, &pk_B, chat_data->pk_B, 33)) {
++        printf("[secp256k1_ec_pubkey_parse] Failed!\n");
++        secp256k1_context_destroy(ctx);
++        return 0;
++    }
++    /* Here comes the code from the paper */
++    /* k_chat <- H(ECDH(sk_a, pk_B) || vk_A) */
++    if (!secp256k1_ecdh(ctx, k_chat, &pk_B, sk_A, NULL, NULL)) {
++        printf("[secp256k1_ecdh] Failed!\n");
++        secp256k1_context_destroy(ctx);
++        return 0;
++    }
++    secp256k1_sha256_initialize(&sha);
++    secp256k1_sha256_write(&sha, k_chat, 32);
++    secp256k1_sha256_write(&sha, vk_A, 33);
++    secp256k1_sha256_finalize(&sha, k_chat);
++    /* Hash k_chat again if counter > 0 */
++    /* This is neccessary to produce different nonces for different counters */
++    /* as a returned nonce may be invalid for ECDSA if we are really unlucky. */
++    /* When receiving the message, we will only test for counters 0 and 1 because */
++    /* in the vast majority of cases, the counter will be 0. */
++    /* Getting a counter of 2 is not realistic. */
++    for (i = 0; i < counter; ++i) {
++        secp256k1_sha256_initialize(&sha);
++        secp256k1_sha256_write(&sha, k_chat, 32);
++        secp256k1_sha256_finalize(&sha, k_chat);
++    }
++    /* if msg_chat = None: */
++    if (msg_chat == NULL) {
++        /* return k_chat */
++        memcpy(nonce32, k_chat, 32);
++    /* return ctx_chat <- AES_CBC^Enc(msg_chat, k_chat) */
++    } else {
++        secp256k1_sha256_initialize(&sha);
++        secp256k1_sha256_write(&sha, msg32, 32);
++        secp256k1_sha256_write(&sha, k_chat, 32);
++        secp256k1_sha256_finalize(&sha, iv);
++        secp256k1_aesni_256_key_expansion(key_exp, k_chat);
++        secp256k1_aesni_cbc_encrypt(ctx_chat, msg_chat, iv, 32, key_exp, AES_ROUNDS);
++        memcpy(nonce32, ctx_chat, 32);
++    }
++
++    /* Cleanup */
++    memset(key_exp, 0, sizeof(key_exp));
++    memset(k_chat, 0, sizeof(k_chat));
++    secp256k1_context_destroy(ctx);
++    return 1;
++}
++#undef AES_BLOCKSIZE
++#undef AES_ROUNDS
++#endif /* ENABLE_MODULE_ECDH */
++#endif /* ENABLE_MODULE_AESNI */
++
+ static int nonce_function_rfc6979(unsigned char *nonce32, const unsigned char *msg32, const unsigned char *key32, const unsigned char *algo16, void *data, unsigned int counter) {
+    unsigned char keydata[112];
+    unsigned int offset = 0;
+@@ -474,6 +558,11 @@ static int nonce_function_rfc6979(unsigned char *nonce32, const unsigned char *m
+    return 1;
+ }
+ 
++#ifdef ENABLE_MODULE_AESNI
++#ifdef ENABLE_MODULE_ECDH
++const secp256k1_nonce_function secp256k1_nonce_function_chat    = nonce_function_chat;
++#endif
++#endif
+ const secp256k1_nonce_function secp256k1_nonce_function_rfc6979 = nonce_function_rfc6979;
+ const secp256k1_nonce_function secp256k1_nonce_function_default = nonce_function_rfc6979;
+ 
+@@ -759,6 +848,10 @@ int secp256k1_ec_pubkey_combine(const secp256k1_context* ctx, secp256k1_pubkey *
+     return 1;
+ }
+ 
++#ifdef ENABLE_MODULE_AESNI
++# include "modules/aesni/main_impl.h"
++#endif
++
+ #ifdef ENABLE_MODULE_ECDH
+ # include "modules/ecdh/main_impl.h"
+ #endif
+diff --git a/src/tests.c b/src/tests.c
+index c2d5e28..7fc5b4e 100644
+--- a/src/tests.c
++++ b/src/tests.c
+@@ -5379,6 +5379,10 @@ void run_ecdsa_openssl(void) {
+ }
+ #endif
+ 
++#ifdef ENABLE_MODULE_AESNI
++# include "modules/aesni/tests_impl.h"
++#endif
++
+ #ifdef ENABLE_MODULE_ECDH
+ # include "modules/ecdh/tests_impl.h"
+ #endif
+@@ -5653,6 +5657,11 @@ int main(int argc, char **argv) {
+     /* EC key arithmetic test */
+     run_eckey_negate_test();
+ 
++#ifdef ENABLE_MODULE_AESNI
++    /* aesni tests */
++    run_aesni_tests();
++#endif
++
+ #ifdef ENABLE_MODULE_ECDH
+     /* ecdh tests */
+     run_ecdh_tests();
+diff --git a/src/valgrind_ctime_test.c b/src/valgrind_ctime_test.c
+index cfca5a1..378a67c 100644
+--- a/src/valgrind_ctime_test.c
++++ b/src/valgrind_ctime_test.c
+@@ -11,6 +11,10 @@
+ #include "assumptions.h"
+ #include "util.h"
+ 
++#ifdef ENABLE_MODULE_AESNI
++# include "include/secp256k1_aesni.h"
++#endif
++
+ #ifdef ENABLE_MODULE_ECDH
+ # include "include/secp256k1_ecdh.h"
+ #endif
+@@ -100,6 +104,11 @@ void run_tests(secp256k1_context *ctx, unsigned char *key) {
+     CHECK(ret);
+     CHECK(secp256k1_ecdsa_signature_serialize_der(ctx, sig, &siglen, &signature));
+ 
++#ifdef ENABLE_MODULE_AESNI
++    /* Test AESNI. */
++    CHECK(1 == 1);
++#endif
++
+ #ifdef ENABLE_MODULE_ECDH
+     /* Test ECDH. */
+     VALGRIND_MAKE_MEM_UNDEFINED(key, 32);

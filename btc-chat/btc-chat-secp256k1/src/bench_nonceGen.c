@@ -1,0 +1,86 @@
+#include <string.h>
+
+#include "include/secp256k1.h"
+#include "util.h"
+#include "bench.h"
+
+typedef struct {
+    unsigned char msg32[32];
+    unsigned char key32[32];
+    secp256k1_chat_data *data;
+    unsigned int attempt;
+} bench_nonceGen_data_t;
+
+static void bench_nonceGen_setup(void *arg) {
+    unsigned int i;
+    unsigned char pk[33] = {
+        0x02,
+        0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac,
+        0x55, 0xa0, 0x62, 0x95, 0xce, 0x87, 0x0b, 0x07,
+        0x02, 0x9b, 0xfc, 0xdb, 0x2d, 0xce, 0x28, 0xd9,
+        0x59, 0xf2, 0x81, 0x5b, 0x16, 0xf8, 0x17, 0x98
+    };
+    bench_nonceGen_data_t *bench_data;
+
+    bench_data = (bench_nonceGen_data_t *)arg;
+    bench_data->data = calloc(1, sizeof(secp256k1_chat_data));
+    bench_data->data->msg_chat = calloc(32, sizeof(unsigned char));
+    bench_data->data->pk_B = calloc(33, sizeof(unsigned char));
+    bench_data->data->sk_A = calloc(32, sizeof(unsigned char));
+    bench_data->data->vk_A = calloc(33, sizeof(unsigned char));
+    for (i = 0; i < 32; ++i) {
+        bench_data->msg32[i] = i;
+        bench_data->key32[i] = i;
+        bench_data->data->msg_chat[i] = i;
+        bench_data->data->pk_B[i] = pk[i];
+        bench_data->data->sk_A[i] = pk[i+1];
+        bench_data->data->vk_A[i] = pk[i];
+        bench_data->attempt = 0;
+    }
+    bench_data->data->pk_B[32] = pk[32];
+    bench_data->data->vk_A[32] = pk[32];
+}
+
+static void bench_nonceGen_cleanup(void *arg, int iters) {
+    bench_nonceGen_data_t *bench_data;
+    (void)iters;
+    bench_data = (bench_nonceGen_data_t *)arg;
+    free(bench_data->data->vk_A);
+    free(bench_data->data->sk_A);
+    free(bench_data->data->pk_B);
+    free(bench_data->data->msg_chat);
+    free(bench_data->data);
+}
+
+static void bench_nonceGenRfc6979(void *arg, int iters) {
+    int i;
+    unsigned char nonce[32];
+    bench_nonceGen_data_t *data;
+    data = (bench_nonceGen_data_t *)arg;
+    for (i = 0; i < iters; ++i) {
+        CHECK(secp256k1_nonce_function_rfc6979(nonce, data->msg32, data->key32, NULL, NULL, data->attempt) == 1);
+    }
+}
+
+static void bench_nonceGenChat(void *arg, int iters) {
+    int i;
+    unsigned char nonce[32];
+    bench_nonceGen_data_t *data;
+    data = (bench_nonceGen_data_t *)arg;
+    for (i = 0; i < iters; ++i) {
+        CHECK(secp256k1_nonce_function_chat(nonce, data->msg32, data->key32, NULL, data->data, data->attempt) == 1);
+    }
+}
+
+int main(void) {
+    bench_nonceGen_data_t data;
+    int iters;
+
+    iters = get_iters(20000);
+
+    run_benchmark("nonceGenRfc6979", bench_nonceGenRfc6979, bench_nonceGen_setup, bench_nonceGen_cleanup, &data, 10, iters);
+
+    run_benchmark("nonceGenChat", bench_nonceGenChat, bench_nonceGen_setup, bench_nonceGen_cleanup, &data, 10, iters);
+
+    return 0;
+}

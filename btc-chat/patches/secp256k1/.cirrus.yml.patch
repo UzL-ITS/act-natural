@@ -1,0 +1,58 @@
+diff --git a/.cirrus.yml b/.cirrus.yml
+index 9399fbd..631d187 100644
+--- a/.cirrus.yml
++++ b/.cirrus.yml
+@@ -9,6 +9,7 @@ env:
+   RUN_VALGRIND: no
+   EXTRAFLAGS:
+   HOST:
++  AESNI: no
+   ECDH: no
+   RECOVERY: no
+   SCHNORRSIG: no
+@@ -54,10 +55,10 @@ task:
+     memory: 1G
+   matrix: &ENV_MATRIX
+     - env: {WIDEMUL:  int64,  RECOVERY: yes}
+-    - env: {WIDEMUL:  int64,                 ECDH: yes, EXPERIMENTAL: yes, SCHNORRSIG: yes}
++    - env: {WIDEMUL:  int64,                 AESNI: yes, ECDH: yes, EXPERIMENTAL: yes, SCHNORRSIG: yes}
+     - env: {WIDEMUL: int128}
+-    - env: {WIDEMUL: int128,  RECOVERY: yes,            EXPERIMENTAL: yes, SCHNORRSIG: yes}
+-    - env: {WIDEMUL: int128,                 ECDH: yes, EXPERIMENTAL: yes, SCHNORRSIG: yes}
++    - env: {WIDEMUL: int128,  RECOVERY: yes,                        EXPERIMENTAL: yes, SCHNORRSIG: yes}
++    - env: {WIDEMUL: int128,                 AESNI: yes, ECDH: yes, EXPERIMENTAL: yes, SCHNORRSIG: yes}
+     - env: {WIDEMUL: int128,  ASM: x86_64}
+     - env: {BIGNUM: no}
+     - env: {BIGNUM: no,       RECOVERY: yes,            EXPERIMENTAL: yes, SCHNORRSIG: yes}
+@@ -71,6 +72,7 @@ task:
+         UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+         BIGNUM: no
+         ASM: x86_64
++        AESNI: yes
+         ECDH: yes
+         RECOVERY: yes
+         EXPERIMENTAL: yes
+@@ -82,6 +84,7 @@ task:
+         RUN_VALGRIND: yes
+         BIGNUM: no
+         ASM: x86_64
++        AESNI: yes
+         ECDH: yes
+         RECOVERY: yes
+         EXPERIMENTAL: yes
+@@ -106,6 +109,7 @@ task:
+     memory: 1G
+   env:
+     HOST: i686-linux-gnu
++    AESNI: yes
+     ECDH: yes
+     RECOVERY: yes
+     EXPERIMENTAL: yes
+@@ -196,6 +200,7 @@ task:
+     BUILD:
+     WITH_VALGRIND: no
+     BIGNUM: no
++    AESNI: yes
+     ECDH: yes
+     RECOVERY: yes
+     EXPERIMENTAL: yes

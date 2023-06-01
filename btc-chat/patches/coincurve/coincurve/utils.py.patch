@@ -1,0 +1,31 @@
+diff --git a/coincurve/utils.py b/coincurve/utils.py
+index 2e5f5cd..abdca8e 100644
+--- a/coincurve/utils.py
++++ b/coincurve/utils.py
+@@ -20,7 +20,6 @@ PEM_FOOTER = b'-----END PRIVATE KEY-----\n'
+ 
+ 
+ if environ.get('COINCURVE_BUILDING_DOCS') != 'true':
+-    DEFAULT_NONCE = (ffi.NULL, ffi.NULL)
+ 
+     def sha256(bytestr: bytes) -> bytes:
+         return _sha256(bytestr).digest()
+@@ -28,18 +27,12 @@ if environ.get('COINCURVE_BUILDING_DOCS') != 'true':
+ 
+ else:  # no cov
+ 
+-    class __Nonce(tuple):
+-        def __repr__(self):
+-            return '(ffi.NULL, ffi.NULL)'
+-
+     class __HasherSHA256:
+         def __call__(self, bytestr: bytes) -> bytes:
+             return _sha256(bytestr).digest()
+ 
+         def __repr__(self):
+             return 'sha256'
+-
+-    DEFAULT_NONCE = __Nonce((ffi.NULL, ffi.NULL))  # type: ignore
+     sha256 = __HasherSHA256()
+ 
+ 

@@ -1,0 +1,9 @@
+diff --git a/.gitignore b/.gitignore
+index a004851..44a8863 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -15,3 +15,4 @@
+ 
+ /coincurve/_libsecp256k1.py
+ /coincurve/libsecp256k1.dll
++libsecp256k1

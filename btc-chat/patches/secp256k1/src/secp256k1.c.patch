@@ -1,0 +1,118 @@
+diff --git a/src/secp256k1.c b/src/secp256k1.c
+index 4f56c27..7b6b625 100644
+--- a/src/secp256k1.c
++++ b/src/secp256k1.c
+@@ -444,6 +444,90 @@ static SECP256K1_INLINE void buffer_append(unsigned char *buf, unsigned int *off
+     *offset += len;
+ }
+ 
++/* NonceGenChat implementation */
++#ifdef ENABLE_MODULE_AESNI
++#ifdef ENABLE_MODULE_ECDH
++#include "include/secp256k1_aesni.h"
++#include "include/secp256k1_ecdh.h"
++#define AES_ROUNDS 14
++#define AES_BLOCKSIZE 16
++static int nonce_function_chat(unsigned char *nonce32, const unsigned char *msg32, const unsigned char *sk32, const unsigned char *algo16, void *data, unsigned int counter) {
++    /* Inputs as defined in the paper's NonceGenChat function */
++    const unsigned char *sk_A, *msg_chat, *vk_A;
++    secp256k1_pubkey pk_B;
++    /* Output as in the NonceGenChat function in the paper */
++    unsigned char iv[32];
++    unsigned char k_chat[32];
++    unsigned char ctx_chat[32];
++
++    /* Helper variables */
++    unsigned int i;
++    secp256k1_chat_data *chat_data;
++    secp256k1_sha256 sha;
++    secp256k1_context *ctx;
++    unsigned char key_exp[(AES_ROUNDS+1)*AES_BLOCKSIZE];
++    (void)algo16; /* Removes "unused variable" warning */
++    (void)sk32;
++
++    /* Prepare */
++    ctx = secp256k1_context_create(SECP256K1_CONTEXT_NONE);
++    chat_data = (secp256k1_chat_data *)data;
++    sk_A = chat_data->sk_A;
++    msg_chat = chat_data->msg_chat;
++    vk_A = chat_data->vk_A;
++    if (!secp256k1_ec_pubkey_parse(ctx, &pk_B, chat_data->pk_B, 33)) {
++        printf("[secp256k1_ec_pubkey_parse] Failed!\n");
++        secp256k1_context_destroy(ctx);
++        return 0;
++    }
++    /* Here comes the code from the paper */
++    /* k_chat <- H(ECDH(sk_a, pk_B) || vk_A) */
++    if (!secp256k1_ecdh(ctx, k_chat, &pk_B, sk_A, NULL, NULL)) {
++        printf("[secp256k1_ecdh] Failed!\n");
++        secp256k1_context_destroy(ctx);
++        return 0;
++    }
++    secp256k1_sha256_initialize(&sha);
++    secp256k1_sha256_write(&sha, k_chat, 32);
++    secp256k1_sha256_write(&sha, vk_A, 33);
++    secp256k1_sha256_finalize(&sha, k_chat);
++    /* Hash k_chat again if counter > 0 */
++    /* This is neccessary to produce different nonces for different counters */
++    /* as a returned nonce may be invalid for ECDSA if we are really unlucky. */
++    /* When receiving the message, we will only test for counters 0 and 1 because */
++    /* in the vast majority of cases, the counter will be 0. */
++    /* Getting a counter of 2 is not realistic. */
++    for (i = 0; i < counter; ++i) {
++        secp256k1_sha256_initialize(&sha);
++        secp256k1_sha256_write(&sha, k_chat, 32);
++        secp256k1_sha256_finalize(&sha, k_chat);
++    }
++    /* if msg_chat = None: */
++    if (msg_chat == NULL) {
++        /* return k_chat */
++        memcpy(nonce32, k_chat, 32);
++    /* return ctx_chat <- AES_CBC^Enc(msg_chat, k_chat) */
++    } else {
++        secp256k1_sha256_initialize(&sha);
++        secp256k1_sha256_write(&sha, msg32, 32);
++        secp256k1_sha256_write(&sha, k_chat, 32);
++        secp256k1_sha256_finalize(&sha, iv);
++        secp256k1_aesni_256_key_expansion(key_exp, k_chat);
++        secp256k1_aesni_cbc_encrypt(ctx_chat, msg_chat, iv, 32, key_exp, AES_ROUNDS);
++        memcpy(nonce32, ctx_chat, 32);
++    }
++
++    /* Cleanup */
++    memset(key_exp, 0, sizeof(key_exp));
++    memset(k_chat, 0, sizeof(k_chat));
++    secp256k1_context_destroy(ctx);
++    return 1;
++}
++#undef AES_BLOCKSIZE
++#undef AES_ROUNDS
++#endif /* ENABLE_MODULE_ECDH */
++#endif /* ENABLE_MODULE_AESNI */
++
+ static int nonce_function_rfc6979(unsigned char *nonce32, const unsigned char *msg32, const unsigned char *key32, const unsigned char *algo16, void *data, unsigned int counter) {
+    unsigned char keydata[112];
+    unsigned int offset = 0;
+@@ -474,6 +558,11 @@ static int nonce_function_rfc6979(unsigned char *nonce32, const unsigned char *m
+    return 1;
+ }
+ 
++#ifdef ENABLE_MODULE_AESNI
++#ifdef ENABLE_MODULE_ECDH
++const secp256k1_nonce_function secp256k1_nonce_function_chat    = nonce_function_chat;
++#endif
++#endif
+ const secp256k1_nonce_function secp256k1_nonce_function_rfc6979 = nonce_function_rfc6979;
+ const secp256k1_nonce_function secp256k1_nonce_function_default = nonce_function_rfc6979;
+ 
+@@ -759,6 +848,10 @@ int secp256k1_ec_pubkey_combine(const secp256k1_context* ctx, secp256k1_pubkey *
+     return 1;
+ }
+ 
++#ifdef ENABLE_MODULE_AESNI
++# include "modules/aesni/main_impl.h"
++#endif
++
+ #ifdef ENABLE_MODULE_ECDH
+ # include "modules/ecdh/main_impl.h"
+ #endif

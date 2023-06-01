@@ -1,0 +1,256 @@
+diff --git a/xrpl/asyncio/transaction/main.py b/xrpl/asyncio/transaction/main.py
+index 8aa942c..f545dd6 100644
+--- a/xrpl/asyncio/transaction/main.py
++++ b/xrpl/asyncio/transaction/main.py
+@@ -21,6 +21,7 @@ from xrpl.models.transactions.transaction import (
+ from xrpl.models.transactions.types.transaction_type import TransactionType
+ from xrpl.utils import drops_to_xrp, xrp_to_drops
+ from xrpl.wallet.main import Wallet
++from xrpl.core.keypairs import ChatNonce
+ 
+ _LEDGER_OFFSET: Final[int] = 20
+ 
+@@ -34,6 +35,7 @@ async def safe_sign_and_submit_transaction(
+     client: Client,
+     autofill: bool = True,
+     check_fee: bool = True,
++    nonce: ChatNonce = None,
+ ) -> Response:
+     """
+     Signs a transaction (locally, without trusting external rippled nodes) and submits
+@@ -52,10 +54,10 @@ async def safe_sign_and_submit_transaction(
+     """
+     if autofill:
+         transaction = await safe_sign_and_autofill_transaction(
+-            transaction, wallet, client, check_fee
++            transaction, wallet, client, check_fee, nonce=nonce
+         )
+     else:
+-        transaction = await safe_sign_transaction(transaction, wallet, check_fee)
++        transaction = await safe_sign_transaction(transaction, wallet, check_fee, nonce=nonce)
+     return await submit_transaction(transaction, client)
+ 
+ 
+@@ -63,6 +65,7 @@ async def safe_sign_transaction(
+     transaction: Transaction,
+     wallet: Wallet,
+     check_fee: bool = True,
++    nonce: ChatNonce = None,
+ ) -> Transaction:
+     """
+     Signs a transaction locally, without trusting external rippled nodes.
+@@ -81,7 +84,7 @@ async def safe_sign_transaction(
+     transaction_json = _prepare_transaction(transaction, wallet)
+     serialized_for_signing = encode_for_signing(transaction_json)
+     serialized_bytes = bytes.fromhex(serialized_for_signing)
+-    signature = sign(serialized_bytes, wallet.private_key)
++    signature = sign(serialized_bytes, wallet.private_key, nonce=nonce)
+     transaction_json["TxnSignature"] = signature
+     return cast(Transaction, Transaction.from_xrpl(transaction_json))
+ 
+@@ -91,6 +94,7 @@ async def safe_sign_and_autofill_transaction(
+     wallet: Wallet,
+     client: Client,
+     check_fee: bool = True,
++    nonce: ChatNonce = None,
+ ) -> Transaction:
+     """
+     Signs a transaction locally, without trusting external rippled nodes. Autofills
+@@ -113,7 +117,7 @@ async def safe_sign_and_autofill_transaction(
+         await _check_fee(transaction, client)
+ 
+     return await safe_sign_transaction(
+-        await autofill(transaction, client), wallet, False
++        await autofill(transaction, client), wallet, False, nonce=nonce
+     )
+ 
+ 
+diff --git a/xrpl/core/keypairs/__init__.py b/xrpl/core/keypairs/__init__.py
+index 99fa812..001a22e 100644
+--- a/xrpl/core/keypairs/__init__.py
++++ b/xrpl/core/keypairs/__init__.py
+@@ -12,6 +12,7 @@ from xrpl.core.keypairs.main import (
+     is_valid_message,
+     sign,
+ )
++from xrpl.core.keypairs.crypto_implementation import ChatNonce
+ 
+ assert (
+     "ripemd160" in algorithms_available
+@@ -25,4 +26,5 @@ __all__ = [
+     "is_valid_message",
+     "sign",
+     "XRPLKeypairsException",
++    "ChatNonce",
+ ]
+diff --git a/xrpl/core/keypairs/crypto_implementation.py b/xrpl/core/keypairs/crypto_implementation.py
+index 9166044..4c5d1f2 100644
+--- a/xrpl/core/keypairs/crypto_implementation.py
++++ b/xrpl/core/keypairs/crypto_implementation.py
+@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
+ from typing import Tuple, Type
+ 
+ from ecpy.keys import ECPrivateKey  # type: ignore
++from ecpy.chat_nonce import ChatNonce
+ 
+ 
+ class CryptoImplementation(ABC):
+@@ -31,6 +32,7 @@ class CryptoImplementation(ABC):
+         cls: Type[CryptoImplementation],
+         message: bytes,
+         private_key: str,
++        nonce: ChatNonce = None,
+     ) -> bytes:
+         pass
+ 
+diff --git a/xrpl/core/keypairs/ed25519.py b/xrpl/core/keypairs/ed25519.py
+index e9f6242..5cec706 100644
+--- a/xrpl/core/keypairs/ed25519.py
++++ b/xrpl/core/keypairs/ed25519.py
+@@ -9,7 +9,7 @@ from ecpy.eddsa import EDDSA  # type: ignore
+ from ecpy.keys import ECPrivateKey, ECPublicKey  # type: ignore
+ from typing_extensions import Final
+ 
+-from xrpl.core.keypairs.crypto_implementation import CryptoImplementation
++from xrpl.core.keypairs.crypto_implementation import CryptoImplementation, ChatNonce
+ from xrpl.core.keypairs.exceptions import XRPLKeypairsException
+ from xrpl.core.keypairs.helpers import sha512_first_half
+ 
+@@ -54,7 +54,7 @@ class ED25519(CryptoImplementation):
+         )
+ 
+     @classmethod
+-    def sign(cls: Type[ED25519], message: bytes, private_key: str) -> bytes:
++    def sign(cls: Type[ED25519], message: bytes, private_key: str, nonce: ChatNonce = None) -> bytes:
+         """
+         Signs a message using a given Ed25519 private key.
+ 
+@@ -67,7 +67,7 @@ class ED25519(CryptoImplementation):
+         """
+         raw_private = private_key[len(PREFIX) :]
+         wrapped_private = ECPrivateKey(int(raw_private, 16), _CURVE)
+-        return cast(bytes, _SIGNER.sign(message, wrapped_private))
++        return cast(bytes, _SIGNER.sign(message, wrapped_private, nonce=nonce,))
+ 
+     @classmethod
+     def is_valid_message(
+diff --git a/xrpl/core/keypairs/main.py b/xrpl/core/keypairs/main.py
+index 13587fd..e8888e3 100644
+--- a/xrpl/core/keypairs/main.py
++++ b/xrpl/core/keypairs/main.py
+@@ -6,7 +6,7 @@ from typing_extensions import Final
+ 
+ from xrpl.constants import CryptoAlgorithm
+ from xrpl.core import addresscodec
+-from xrpl.core.keypairs.crypto_implementation import CryptoImplementation
++from xrpl.core.keypairs.crypto_implementation import CryptoImplementation, ChatNonce
+ from xrpl.core.keypairs.ed25519 import ED25519
+ from xrpl.core.keypairs.ed25519 import PREFIX as ED_PREFIX
+ from xrpl.core.keypairs.exceptions import XRPLKeypairsException
+@@ -90,7 +90,7 @@ def derive_classic_address(public_key: str) -> str:
+     return addresscodec.encode_classic_address(account_id)
+ 
+ 
+-def sign(message: bytes, private_key: str) -> str:
++def sign(message: bytes, private_key: str, nonce: ChatNonce = None) -> str:
+     """
+     Sign a message using a given private key.
+ 
+@@ -106,6 +106,7 @@ def sign(message: bytes, private_key: str) -> str:
+         .sign(
+             message,
+             private_key,
++            nonce=nonce,
+         )
+         .hex()
+         .upper()
+diff --git a/xrpl/core/keypairs/secp256k1.py b/xrpl/core/keypairs/secp256k1.py
+index db6474c..bbad93e 100644
+--- a/xrpl/core/keypairs/secp256k1.py
++++ b/xrpl/core/keypairs/secp256k1.py
+@@ -13,7 +13,7 @@ from ecpy.ecdsa import ECDSA  # type: ignore
+ from ecpy.keys import ECPrivateKey, ECPublicKey  # type: ignore
+ from typing_extensions import Final, Literal
+ 
+-from xrpl.core.keypairs.crypto_implementation import CryptoImplementation
++from xrpl.core.keypairs.crypto_implementation import CryptoImplementation, ChatNonce
+ from xrpl.core.keypairs.exceptions import XRPLKeypairsException
+ from xrpl.core.keypairs.helpers import sha512_first_half
+ 
+@@ -76,7 +76,7 @@ class SECP256K1(CryptoImplementation):
+         return cls._format_keys(final_public, final_private)
+ 
+     @classmethod
+-    def sign(cls: Type[SECP256K1], message: bytes, private_key: str) -> bytes:
++    def sign(cls: Type[SECP256K1], message: bytes, private_key: str, nonce: ChatNonce = None) -> bytes:
+         """
+         Signs a message using a given secp256k1 private key.
+ 
+@@ -95,6 +95,7 @@ class SECP256K1(CryptoImplementation):
+                 wrapped_private,
+                 sha256,
+                 canonical=True,
++                nonce=nonce,
+             ),
+         )
+ 
+diff --git a/xrpl/transaction/main.py b/xrpl/transaction/main.py
+index 4c43189..29f313b 100644
+--- a/xrpl/transaction/main.py
++++ b/xrpl/transaction/main.py
+@@ -6,6 +6,7 @@ from xrpl.clients.sync_client import SyncClient
+ from xrpl.models.response import Response
+ from xrpl.models.transactions.transaction import Transaction
+ from xrpl.wallet.main import Wallet
++from xrpl.core.keypairs import ChatNonce
+ 
+ 
+ def safe_sign_and_submit_transaction(
+@@ -14,6 +15,7 @@ def safe_sign_and_submit_transaction(
+     client: SyncClient,
+     autofill: bool = True,
+     check_fee: bool = True,
++    nonce: ChatNonce = None,
+ ) -> Response:
+     """
+     Signs a transaction (locally, without trusting external rippled nodes) and submits
+@@ -37,6 +39,7 @@ def safe_sign_and_submit_transaction(
+             client,
+             autofill,
+             check_fee,
++            nonce=nonce,
+         )
+     )
+ 
+@@ -70,6 +73,7 @@ def safe_sign_transaction(
+     transaction: Transaction,
+     wallet: Wallet,
+     check_fee: bool = True,
++    nonce: ChatNonce = None,
+ ) -> Transaction:
+     """
+     Signs a transaction locally, without trusting external rippled nodes.
+@@ -88,6 +92,7 @@ def safe_sign_transaction(
+             transaction,
+             wallet,
+             check_fee,
++            nonce=nonce,
+         )
+     )
+ 
+@@ -97,6 +102,7 @@ def safe_sign_and_autofill_transaction(
+     wallet: Wallet,
+     client: SyncClient,
+     check_fee: bool = True,
++    nonce: ChatNonce = None,
+ ) -> Transaction:
+     """
+     Signs a transaction locally, without trusting external rippled nodes. Autofills
+@@ -118,6 +124,7 @@ def safe_sign_and_autofill_transaction(
+             wallet,
+             client,
+             check_fee,
++            nonce=nonce,
+         )
+     )
+ 

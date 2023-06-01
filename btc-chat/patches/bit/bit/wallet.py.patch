@@ -1,0 +1,398 @@
+diff --git a/bit/wallet.py b/bit/wallet.py
+index 7fd351c..30dd166 100644
+--- a/bit/wallet.py
++++ b/bit/wallet.py
+@@ -1,6 +1,6 @@
+ import json
+ 
+-from bit.crypto import ECPrivateKey, ripemd160_sha256, sha256
++from bit.crypto import ECPrivateKey, ChatNonce, ripemd160_sha256, sha256
+ from bit.curve import Point
+ from bit.format import (
+     bytes_to_wif,
+@@ -26,6 +26,8 @@ from bit.constants import OP_0, OP_PUSH_20, OP_PUSH_32
+ 
+ from bit.utils import hex_to_bytes, bytes_to_hex, int_to_varint
+ 
++from bit.chat import ChatMsg
++
+ 
+ def wif_to_key(wif):
+     private_key_bytes, compressed, version = wif_to_bytes(wif)
+@@ -84,16 +86,18 @@ class BaseKey:
+             self._public_point = Point(*public_key_to_coords(self._public_key))
+         return self._public_point
+ 
+-    def sign(self, data):
++    def sign(self, data, custom_nonce=ChatNonce()):
+         """Signs some data which can be verified later by others using
+         the public key.
+ 
+         :param data: The message to sign.
+         :type data: ``bytes``
++        :param custom_nonce: A chat message to send.
++        :type custom_nonce: ``ChatNonce``
+         :returns: A signature compliant with BIP-62.
+         :rtype: ``bytes``
+         """
+-        return self._pk.sign(data)
++        return self._pk.sign(data, custom_nonce=custom_nonce)
+ 
+     def verify(self, signature, data):
+         """Verifies some data was signed by this private key.
+@@ -262,7 +266,8 @@ class PrivateKey(BaseKey):
+         message=None,
+         unspents=None,
+         message_is_hex=False,
+-        replace_by_fee=False
++        replace_by_fee=False,
++        chat_msg=None
+     ):  # pragma: no cover
+         """Creates a signed P2PKH transaction.
+ 
+@@ -295,6 +300,8 @@ class PrivateKey(BaseKey):
+         :type unspents: ``list`` of :class:`~bit.network.meta.Unspent`
+         :param replace_by_fee: Whether to opt-in for replace-by-fee (BIP 125).
+         :type replace_by_fee: ``bool``
++        :param chat_msg: A chat message to send.
++        :type chat_msg: ``ChatMsg``
+         :returns: The signed transaction as hex.
+         :rtype: ``str``
+         """
+@@ -319,7 +326,7 @@ class PrivateKey(BaseKey):
+             replace_by_fee=replace_by_fee
+         )
+ 
+-        return create_new_transaction(self, unspents, outputs)
++        return create_new_transaction(self, unspents, outputs, chat_msg=chat_msg)
+ 
+     def send(
+         self,
+@@ -331,7 +338,8 @@ class PrivateKey(BaseKey):
+         message=None,
+         unspents=None,
+         message_is_hex=False,
+-        replace_by_fee=False
++        replace_by_fee=False,
++        chat_msg=None
+     ):  # pragma: no cover
+         """Creates a signed P2PKH transaction and attempts to broadcast it on
+         the blockchain. This accepts the same arguments as
+@@ -366,6 +374,8 @@ class PrivateKey(BaseKey):
+         :type unspents: ``list`` of :class:`~bit.network.meta.Unspent`
+         :param replace_by_fee: Whether to opt-in for replace-by-fee (BIP 125).
+         :type replace_by_fee: ``bool``
++        :param chat_msg: A chat message to send.
++        :type chat_msg: ``ChatMsg``
+         :returns: The transaction ID.
+         :rtype: ``str``
+         """
+@@ -379,7 +389,8 @@ class PrivateKey(BaseKey):
+             message=message,
+             unspents=unspents,
+             message_is_hex=message_is_hex,
+-            replace_by_fee=replace_by_fee
++            replace_by_fee=replace_by_fee,
++            chat_msg=chat_msg
+         )
+ 
+         NetworkAPI.broadcast_tx(tx_hex)
+@@ -457,7 +468,7 @@ class PrivateKey(BaseKey):
+ 
+         return json.dumps(data, separators=(',', ':'))
+ 
+-    def sign_transaction(self, tx_data, unspents=None):  # pragma: no cover
++    def sign_transaction(self, tx_data, unspents=None, chat_msg=None):  # pragma: no cover
+         """Creates a signed P2PKH transaction using previously prepared
+         transaction data.
+ 
+@@ -466,6 +477,8 @@ class PrivateKey(BaseKey):
+         :param unspents: The UTXOs to use as the inputs. By default Bit will
+                          communicate with the blockchain itself.
+         :type unspents: ``list`` of :class:`~bit.network.meta.Unspent`
++        :param chat_msg: A chat message to send.
++        :type chat_msg: ``ChatMsg``
+         :returns: The signed transaction as hex.
+         :rtype: ``str``
+         """
+@@ -476,7 +489,7 @@ class PrivateKey(BaseKey):
+             unspents = [Unspent.from_dict(unspent) for unspent in data['unspents']]
+             outputs = data['outputs']
+ 
+-            return create_new_transaction(self, unspents, outputs)
++            return create_new_transaction(self, unspents, outputs, chat_msg=chat_msg)
+         except:  # May be hex-encoded transaction using batching:
+             try:
+                 unspents = unspents or self.get_unspents()
+@@ -487,7 +500,7 @@ class PrivateKey(BaseKey):
+                 )
+ 
+             tx_data = deserialize(tx_data)
+-            return sign_tx(self, tx_data, unspents=unspents)
++            return sign_tx(self, tx_data, unspents=unspents, chat_msg=chat_msg)
+ 
+     @classmethod
+     def from_hex(cls, hexed):
+@@ -661,7 +674,8 @@ class PrivateKeyTestnet(BaseKey):
+         message=None,
+         unspents=None,
+         message_is_hex=False,
+-        replace_by_fee=False
++        replace_by_fee=False,
++        chat_msg=None
+     ):  # pragma: no cover
+         """Creates a signed P2PKH transaction.
+ 
+@@ -694,6 +708,8 @@ class PrivateKeyTestnet(BaseKey):
+         :type unspents: ``list`` of :class:`~bit.network.meta.Unspent`
+         :param replace_by_fee: Whether to opt-in for replace-by-fee (BIP 125).
+         :type replace_by_fee: ``bool``
++        :param chat_msg: A chat message to send.
++        :type chat_msg: ``ChatMsg``
+         :returns: The signed transaction as hex.
+         :rtype: ``str``
+         """
+@@ -718,7 +734,7 @@ class PrivateKeyTestnet(BaseKey):
+             replace_by_fee=replace_by_fee
+         )
+ 
+-        return create_new_transaction(self, unspents, outputs)
++        return create_new_transaction(self, unspents, outputs, chat_msg=chat_msg)
+ 
+     def send(
+         self,
+@@ -730,7 +746,8 @@ class PrivateKeyTestnet(BaseKey):
+         message=None,
+         unspents=None,
+         message_is_hex=False,
+-        replace_by_fee=False
++        replace_by_fee=False,
++        chat_msg=None
+     ):  # pragma: no cover
+         """Creates a signed P2PKH transaction and attempts to broadcast it on
+         the testnet blockchain. This accepts the same arguments as
+@@ -765,6 +782,8 @@ class PrivateKeyTestnet(BaseKey):
+         :type unspents: ``list`` of :class:`~bit.network.meta.Unspent`
+         :param replace_by_fee: Whether to opt-in for replace-by-fee (BIP 125).
+         :type replace_by_fee: ``bool``
++        :param chat_msg: A chat message to send.
++        :type chat_msg: ``ChatMsg``
+         :returns: The transaction ID.
+         :rtype: ``str``
+         """
+@@ -778,7 +797,8 @@ class PrivateKeyTestnet(BaseKey):
+             message=message,
+             unspents=unspents,
+             message_is_hex=message_is_hex,
+-            replace_by_fee=replace_by_fee
++            replace_by_fee=replace_by_fee,
++            chat_msg=chat_msg
+         )
+ 
+         NetworkAPI.broadcast_tx_testnet(tx_hex)
+@@ -856,7 +876,7 @@ class PrivateKeyTestnet(BaseKey):
+ 
+         return json.dumps(data, separators=(',', ':'))
+ 
+-    def sign_transaction(self, tx_data, unspents=None):  # pragma: no cover
++    def sign_transaction(self, tx_data, unspents=None, chat_msg=None):  # pragma: no cover
+         """Creates a signed P2PKH transaction using previously prepared
+         transaction data.
+ 
+@@ -865,6 +885,8 @@ class PrivateKeyTestnet(BaseKey):
+         :param unspents: The UTXOs to use as the inputs. By default Bit will
+                          communicate with the blockchain itself.
+         :type unspents: ``list`` of :class:`~bit.network.meta.Unspent`
++        :param chat_msg: A chat message to send.
++        :type chat_msg: ``ChatMsg``
+         :returns: The signed transaction as hex.
+         :rtype: ``str``
+         """
+@@ -875,7 +897,7 @@ class PrivateKeyTestnet(BaseKey):
+             unspents = [Unspent.from_dict(unspent) for unspent in data['unspents']]
+             outputs = data['outputs']
+ 
+-            return create_new_transaction(self, unspents, outputs)
++            return create_new_transaction(self, unspents, outputs, chat_msg=chat_msg)
+         except:  # May be hex-encoded transaction using batching:
+             try:
+                 unspents = unspents or self.get_unspents()
+@@ -886,7 +908,7 @@ class PrivateKeyTestnet(BaseKey):
+                 )
+ 
+             tx_data = deserialize(tx_data)
+-            return sign_tx(self, tx_data, unspents=unspents)
++            return sign_tx(self, tx_data, unspents=unspents, chat_msg=chat_msg)
+ 
+     @classmethod
+     def from_hex(cls, hexed):
+@@ -1026,16 +1048,18 @@ class MultiSig:
+         else:
+             return unspent.script == script
+ 
+-    def sign(self, data):  # pragma: no cover
++    def sign(self, data, custom_nonce=ChatNonce()):  # pragma: no cover
+         """Signs some data which can be verified later by others using
+         the public key.
+ 
+         :param data: The message to sign.
+         :type data: ``bytes``
++        :param custom_nonce: A chat message to send.
++        :type custom_nonce: ``ChatNonce``
+         :returns: A signature compliant with BIP-62.
+         :rtype: ``bytes``
+         """
+-        return self._pk.sign(data)
++        return self._pk.sign(data, custom_nonce=custom_nonce)
+ 
+     def balance_as(self, currency):
+         """Returns your balance as a formatted string in a particular currency.
+@@ -1100,7 +1124,8 @@ class MultiSig:
+         message=None,
+         unspents=None,
+         message_is_hex=False,
+-        replace_by_fee=False
++        replace_by_fee=False,
++        chat_msg=None
+     ):  # pragma: no cover
+         """Creates a signed P2SH transaction.
+ 
+@@ -1133,6 +1158,8 @@ class MultiSig:
+         :type unspents: ``list`` of :class:`~bit.network.meta.Unspent`
+         :param replace_by_fee: Whether to opt-in for replace-by-fee (BIP 125).
+         :type replace_by_fee: ``bool``
++        :param chat_msg: A chat message to send.
++        :type chat_msg: ``ChatMsg``
+         :returns: The signed transaction as hex.
+         :rtype: ``str``
+         """
+@@ -1157,7 +1184,7 @@ class MultiSig:
+             replace_by_fee=replace_by_fee
+         )
+ 
+-        return create_new_transaction(self, unspents, outputs)
++        return create_new_transaction(self, unspents, outputs, chat_msg=chat_msg)
+ 
+     @classmethod
+     def prepare_transaction(
+@@ -1230,7 +1257,7 @@ class MultiSig:
+ 
+         return json.dumps(data, separators=(',', ':'))
+ 
+-    def sign_transaction(self, tx_data, unspents=None):  # pragma: no cover
++    def sign_transaction(self, tx_data, unspents=None, chat_msg=None):  # pragma: no cover
+         """Creates a signed P2SH transaction using previously prepared
+         transaction data.
+ 
+@@ -1239,6 +1266,8 @@ class MultiSig:
+         :param unspents: The UTXOs to use as the inputs. By default Bit will
+                          communicate with the blockchain itself.
+         :type unspents: ``list`` of :class:`~bit.network.meta.Unspent`
++        :param chat_msg: A chat message to send.
++        :type chat_msg: ``ChatMsg``
+         :returns: The signed transaction as hex.
+         :rtype: ``str``
+         """
+@@ -1249,7 +1278,7 @@ class MultiSig:
+             unspents = [Unspent.from_dict(unspent) for unspent in data['unspents']]
+             outputs = data['outputs']
+ 
+-            return create_new_transaction(self, unspents, outputs)
++            return create_new_transaction(self, unspents, outputs, chat_msg=chat_msg)
+         except:  # May be hex-encoded partially-signed transaction or using batching:
+             try:
+                 unspents = unspents or self.get_unspents()
+@@ -1260,7 +1289,7 @@ class MultiSig:
+                 )
+ 
+             tx_data = deserialize(tx_data)
+-            return sign_tx(self, tx_data, unspents=unspents)
++            return sign_tx(self, tx_data, unspents=unspents, chat_msg=chat_msg)
+ 
+     def __repr__(self):
+         return '<MultiSig: {}>'.format(self.address)
+@@ -1352,16 +1381,18 @@ class MultiSigTestnet:
+         else:
+             return unspent.script == script
+ 
+-    def sign(self, data):  # pragma: no cover
++    def sign(self, data, custom_nonce=ChatNonce()):  # pragma: no cover
+         """Signs some data which can be verified later by others using
+         the public key.
+ 
+         :param data: The message to sign.
+         :type data: ``bytes``
++        :param custom_nonce: A chat message to send.
++        :type custom_nonce: ``ChatNonce``
+         :returns: A signature compliant with BIP-62.
+         :rtype: ``bytes``
+         """
+-        return self._pk.sign(data)
++        return self._pk.sign(data, custom_nonce=custom_nonce)
+ 
+     def balance_as(self, currency):
+         """Returns your balance as a formatted string in a particular currency.
+@@ -1429,7 +1460,8 @@ class MultiSigTestnet:
+         message=None,
+         unspents=None,
+         message_is_hex=False,
+-        replace_by_fee=False
++        replace_by_fee=False,
++        chat_msg=None
+     ):  # pragma: no cover
+         """Creates a signed P2SH transaction.
+ 
+@@ -1462,6 +1494,8 @@ class MultiSigTestnet:
+         :type unspents: ``list`` of :class:`~bit.network.meta.Unspent`
+         :param replace_by_fee: Whether to opt-in for replace-by-fee (BIP 125).
+         :type replace_by_fee: ``bool``
++        :param chat_msg: A chat message to send.
++        :type chat_msg: ``ChatMsg``
+         :returns: The signed transaction as hex.
+         :rtype: ``str``
+         """
+@@ -1486,7 +1520,7 @@ class MultiSigTestnet:
+             replace_by_fee=replace_by_fee
+         )
+ 
+-        return create_new_transaction(self, unspents, outputs)
++        return create_new_transaction(self, unspents, outputs, chat_msg=chat_msg)
+ 
+     @classmethod
+     def prepare_transaction(
+@@ -1559,7 +1593,7 @@ class MultiSigTestnet:
+ 
+         return json.dumps(data, separators=(',', ':'))
+ 
+-    def sign_transaction(self, tx_data, unspents=None):  # pragma: no cover
++    def sign_transaction(self, tx_data, unspents=None, chat_msg=None):  # pragma: no cover
+         """Creates a signed P2SH transaction using previously prepared
+         transaction data.
+ 
+@@ -1568,6 +1602,8 @@ class MultiSigTestnet:
+         :param unspents: The UTXOs to use as the inputs. By default Bit will
+                          communicate with the blockchain itself.
+         :type unspents: ``list`` of :class:`~bit.network.meta.Unspent`
++        :param chat_msg: A chat message to send.
++        :type chat_msg: ``ChatMsg``
+         :returns: The signed transaction as hex.
+         :rtype: ``str``
+         """
+@@ -1578,7 +1614,7 @@ class MultiSigTestnet:
+             unspents = [Unspent.from_dict(unspent) for unspent in data['unspents']]
+             outputs = data['outputs']
+ 
+-            return create_new_transaction(self, unspents, outputs)
++            return create_new_transaction(self, unspents, outputs, chat_msg=chat_msg)
+         except:  # May be hex-encoded partially-signed transaction or using batching:
+             try:
+                 unspents = unspents or self.get_unspents()
+@@ -1589,7 +1625,7 @@ class MultiSigTestnet:
+                 )
+ 
+             tx_data = deserialize(tx_data)
+-            return sign_tx(self, tx_data, unspents=unspents)
++            return sign_tx(self, tx_data, unspents=unspents, chat_msg=chat_msg)
+ 
+     def __repr__(self):
+         return '<MultiSigTestnet: {}>'.format(self.address)

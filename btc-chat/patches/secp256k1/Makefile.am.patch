@@ -1,0 +1,35 @@
+diff --git a/Makefile.am b/Makefile.am
+index 023fa60..00131c7 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -90,6 +90,19 @@ bench_internal_CPPFLAGS = -DSECP256K1_BUILD $(SECP_INCLUDES)
+ bench_ecmult_SOURCES = src/bench_ecmult.c
+ bench_ecmult_LDADD = $(SECP_LIBS) $(COMMON_LIB)
+ bench_ecmult_CPPFLAGS = -DSECP256K1_BUILD $(SECP_INCLUDES)
++if ENABLE_MODULE_AESNI
++if ENABLE_MODULE_ECDH
++noinst_PROGRAMS += bench_nonceGen
++bench_nonceGen_SOURCES = src/bench_nonceGen.c
++bench_nonceGen_LDADD = libsecp256k1.la $(SECP_LIBS) $(SECP_TEST_LIBS) $(COMMON_LIB)
++noinst_PROGRAMS += bench_ecdsa_sign
++bench_ecdsa_sign_SOURCES = src/bench_ecdsa_sign.c
++bench_ecdsa_sign_LDADD = libsecp256k1.la $(SECP_LIBS) $(SECP_TEST_LIBS) $(COMMON_LIB)
++noinst_PROGRAMS += bench_sha256
++bench_sha256_SOURCES = src/bench_sha256.c
++bench_sha256_LDADD = libsecp256k1.la $(SECP_LIBS) $(SECP_TEST_LIBS) $(COMMON_LIB)
++endif
++endif
+ endif
+ 
+ TESTS =
+@@ -147,6 +160,10 @@ endif
+ 
+ EXTRA_DIST = autogen.sh src/gen_context.c src/basic-config.h
+ 
++if ENABLE_MODULE_AESNI
++include src/modules/aesni/Makefile.am.include
++endif
++
+ if ENABLE_MODULE_ECDH
+ include src/modules/ecdh/Makefile.am.include
+ endif

@@ -1,0 +1,74 @@
+diff --git a/bit/transaction.py b/bit/transaction.py
+index cfdc1c2..2daf506 100644
+--- a/bit/transaction.py
++++ b/bit/transaction.py
+@@ -4,7 +4,7 @@ from itertools import islice
+ import math
+ import re
+ from random import randint, shuffle
+-from bit.crypto import double_sha256, sha256
++from bit.crypto import ChatNonce, double_sha256, sha256
+ from bit.exceptions import InsufficientFunds
+ from bit.format import address_to_public_key_hash, segwit_scriptpubkey
+ from bit.network.rates import currency_to_satoshi_cached
+@@ -559,7 +559,7 @@ def calculate_preimages(tx_obj, inputs_parameters):
+     return preimages
+ 
+ 
+-def sign_tx(private_key, tx, *, unspents):
++def sign_tx(private_key, tx, *, unspents, chat_msg=None):
+     """Signs inputs in provided transaction object for which unspents
+     are provided and can be signed by the private key.
+ 
+@@ -570,6 +570,8 @@ def sign_tx(private_key, tx, *, unspents):
+     :param unspents: For inputs to be signed their corresponding Unspent objects
+                      must be provided.
+     :type unspents: ``list`` of :class:`~bit.network.meta.Unspent`
++    :param chat_msg: A chat message to send.
++    :type chat_msg: ``ChatMsg``
+     :returns: The signed transaction as hex.
+     :rtype: ``str``
+     """
+@@ -587,6 +589,10 @@ def sign_tx(private_key, tx, *, unspents):
+         raise TypeError(
+             'Please provide as unspents at least all inputs to be signed with the function call in a list.'
+         )
++    if (not chat_msg is None) and (len(input_dict) < len(chat_msg.nonces)):
++        raise ValueError(
++            'The number of signable inputs is less than the number of message blocks. Either shorten your message or include more inputs belonging to this private key in the transaction.'
++        )
+ 
+     # Determine input indices to sign from input_dict (allows for transaction batching)
+     sign_inputs = [j for j, i in enumerate(tx.TxIn) if i.txid + i.txindex in input_dict]
+@@ -638,8 +644,13 @@ def sign_tx(private_key, tx, *, unspents):
+     preimages = calculate_preimages(tx, inputs_parameters)
+ 
+     # Calculate signature scripts:
+-    for hash, (i, _, segwit_input) in zip(preimages, inputs_parameters):
+-        signature = private_key.sign(hash) + b'\x01'
++    for j, (hash, (i, _, segwit_input)) in enumerate(zip(preimages, inputs_parameters)):
++        if chat_msg is None or j >= len(chat_msg.nonces):
++            signature = private_key.sign(hash, ChatNonce()) + b'\x01'
++            pass
++        else:
++            signature = private_key.sign(hash, chat_msg.nonces[j]) + b'\x01'
++            pass
+ 
+         # ------------------------------------------------------------------
+         if private_key.instance == 'MultiSig' or private_key.instance == 'MultiSigTestnet':
+@@ -714,7 +725,7 @@ def sign_tx(private_key, tx, *, unspents):
+     return tx.to_hex()
+ 
+ 
+-def create_new_transaction(private_key, unspents, outputs):
++def create_new_transaction(private_key, unspents, outputs, chat_msg=None):
+ 
+     version = VERSION_1
+     lock_time = LOCK_TIME
+@@ -733,5 +744,5 @@ def create_new_transaction(private_key, unspents, outputs):
+ 
+     tx_unsigned = TxObj(version, inputs, outputs, lock_time)
+ 
+-    tx = sign_tx(private_key, tx_unsigned, unspents=unspents)
++    tx = sign_tx(private_key, tx_unsigned, unspents=unspents, chat_msg=chat_msg)
+     return tx

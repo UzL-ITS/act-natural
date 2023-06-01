@@ -1,0 +1,32 @@
+diff --git a/src/ecpy/ecrand.py b/src/ecpy/ecrand.py
+index 518a08b..8bb4f90 100644
+--- a/src/ecpy/ecrand.py
++++ b/src/ecpy/ecrand.py
+@@ -18,10 +18,27 @@ from builtins import int
+ from ecpy.curves     import Curve,Point
+ from ecpy.keys       import ECPublicKey, ECPrivateKey
+ from ecpy.formatters import decode_sig, encode_sig
++from ecpy.chat_nonce import ChatNonce
++from ecpy.ecdh       import ecdh
+ 
+ import random
+ import hmac
+ 
++def rnd_chat(curve: Curve, msg_hash, nonce: ChatNonce = None):
++    from hashlib import sha256
++    from Cryptodome.Cipher import AES
++
++    sk_A, pk_B, amsg, vk_A = nonce.sk_A, nonce.pk_B, nonce.msg_chat, nonce.vk_A
++    k_chat = sha256(ecdh(curve, sk_A, pk_B) + vk_A).digest()
++    if amsg is None:
++        return int.from_bytes(k_chat, 'big')
++    assert len(amsg) == 32
++    iv = sha256( msg_hash + k_chat ).digest()[:16]
++    aes = AES.new(k_chat, AES.MODE_CBC, iv=iv)
++    ctx_chat = aes.encrypt(amsg)
++    return int.from_bytes(ctx_chat, 'big')
++
++
+ def rnd(q):
+     """ Returns a random number less than q, with the same bits length than q
+ 

@@ -1,0 +1,17 @@
+diff --git a/.gitignore b/.gitignore
+index ccdef02..5d147bf 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,7 +1,12 @@
+ bench_inv
++bench_aesni
++bench_ecdsa_sign
++bench_nonceGen
++bench_nonceGenChat
+ bench_ecdh
+ bench_ecmult
+ bench_schnorrsig
++bench_sha256
+ bench_sign
+ bench_verify
+ bench_recover

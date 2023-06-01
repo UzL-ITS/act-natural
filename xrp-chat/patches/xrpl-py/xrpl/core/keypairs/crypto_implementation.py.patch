@@ -1,0 +1,20 @@
+diff --git a/xrpl/core/keypairs/crypto_implementation.py b/xrpl/core/keypairs/crypto_implementation.py
+index 9166044..4c5d1f2 100644
+--- a/xrpl/core/keypairs/crypto_implementation.py
++++ b/xrpl/core/keypairs/crypto_implementation.py
+@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
+ from typing import Tuple, Type
+ 
+ from ecpy.keys import ECPrivateKey  # type: ignore
++from ecpy.chat_nonce import ChatNonce
+ 
+ 
+ class CryptoImplementation(ABC):
+@@ -31,6 +32,7 @@ class CryptoImplementation(ABC):
+         cls: Type[CryptoImplementation],
+         message: bytes,
+         private_key: str,
++        nonce: ChatNonce = None,
+     ) -> bytes:
+         pass
+ 

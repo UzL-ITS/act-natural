@@ -1,0 +1,8 @@
+include_HEADERS += include/secp256k1_aesni.h
+noinst_HEADERS += src/modules/aesni/main_impl.h
+noinst_HEADERS += src/modules/aesni/tests_impl.h
+if USE_BENCHMARK
+noinst_PROGRAMS += bench_aesni
+bench_aesni_SOURCES = src/bench_aesni.c
+bench_aesni_LDADD = libsecp256k1.la $(SECP_LIBS) $(COMMON_LIB)
+endif

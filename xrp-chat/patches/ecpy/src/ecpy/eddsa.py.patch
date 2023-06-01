@@ -1,0 +1,33 @@
+diff --git a/src/ecpy/eddsa.py b/src/ecpy/eddsa.py
+index 95222a4..c8f0001 100644
+--- a/src/ecpy/eddsa.py
++++ b/src/ecpy/eddsa.py
+@@ -20,6 +20,7 @@ import binascii
+ from ecpy.curves import Curve,Point
+ from ecpy.keys import ECPublicKey, ECPrivateKey
+ from ecpy.formatters import decode_sig, encode_sig
++from ecpy.chat_nonce import ChatNonce
+ import hashlib
+ 
+ class EDDSA:
+@@ -114,17 +115,17 @@ class EDDSA:
+        
+         return a,A,h
+ 
+-    def sign(self, msg, pv_key):
++    def sign(self, msg, pv_key, nonce: ChatNonce = None):
+         """ Signs a message.
+ 
+         Args:
+             msg (bytes)                    : the message to sign
+             pv_key (ecpy.keys.ECPrivateKey): key to use for signing
+         """
+-        return self._do_sign(msg, pv_key)
++        return self._do_sign(msg, pv_key, nonce=nonce)
+ 
+     
+-    def _do_sign(self,msg,pv_key):
++    def _do_sign(self,msg,pv_key, nonce: ChatNonce = None):
+         curve = pv_key.curve
+         B     = curve.generator
+         n     = curve.order

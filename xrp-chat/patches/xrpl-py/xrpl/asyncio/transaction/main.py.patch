@@ -1,0 +1,67 @@
+diff --git a/xrpl/asyncio/transaction/main.py b/xrpl/asyncio/transaction/main.py
+index 8aa942c..f545dd6 100644
+--- a/xrpl/asyncio/transaction/main.py
++++ b/xrpl/asyncio/transaction/main.py
+@@ -21,6 +21,7 @@ from xrpl.models.transactions.transaction import (
+ from xrpl.models.transactions.types.transaction_type import TransactionType
+ from xrpl.utils import drops_to_xrp, xrp_to_drops
+ from xrpl.wallet.main import Wallet
++from xrpl.core.keypairs import ChatNonce
+ 
+ _LEDGER_OFFSET: Final[int] = 20
+ 
+@@ -34,6 +35,7 @@ async def safe_sign_and_submit_transaction(
+     client: Client,
+     autofill: bool = True,
+     check_fee: bool = True,
++    nonce: ChatNonce = None,
+ ) -> Response:
+     """
+     Signs a transaction (locally, without trusting external rippled nodes) and submits
+@@ -52,10 +54,10 @@ async def safe_sign_and_submit_transaction(
+     """
+     if autofill:
+         transaction = await safe_sign_and_autofill_transaction(
+-            transaction, wallet, client, check_fee
++            transaction, wallet, client, check_fee, nonce=nonce
+         )
+     else:
+-        transaction = await safe_sign_transaction(transaction, wallet, check_fee)
++        transaction = await safe_sign_transaction(transaction, wallet, check_fee, nonce=nonce)
+     return await submit_transaction(transaction, client)
+ 
+ 
+@@ -63,6 +65,7 @@ async def safe_sign_transaction(
+     transaction: Transaction,
+     wallet: Wallet,
+     check_fee: bool = True,
++    nonce: ChatNonce = None,
+ ) -> Transaction:
+     """
+     Signs a transaction locally, without trusting external rippled nodes.
+@@ -81,7 +84,7 @@ async def safe_sign_transaction(
+     transaction_json = _prepare_transaction(transaction, wallet)
+     serialized_for_signing = encode_for_signing(transaction_json)
+     serialized_bytes = bytes.fromhex(serialized_for_signing)
+-    signature = sign(serialized_bytes, wallet.private_key)
++    signature = sign(serialized_bytes, wallet.private_key, nonce=nonce)
+     transaction_json["TxnSignature"] = signature
+     return cast(Transaction, Transaction.from_xrpl(transaction_json))
+ 
+@@ -91,6 +94,7 @@ async def safe_sign_and_autofill_transaction(
+     wallet: Wallet,
+     client: Client,
+     check_fee: bool = True,
++    nonce: ChatNonce = None,
+ ) -> Transaction:
+     """
+     Signs a transaction locally, without trusting external rippled nodes. Autofills
+@@ -113,7 +117,7 @@ async def safe_sign_and_autofill_transaction(
+         await _check_fee(transaction, client)
+ 
+     return await safe_sign_transaction(
+-        await autofill(transaction, client), wallet, False
++        await autofill(transaction, client), wallet, False, nonce=nonce
+     )
+ 
+ 

@@ -1,0 +1,30 @@
+diff --git a/xrpl/core/keypairs/secp256k1.py b/xrpl/core/keypairs/secp256k1.py
+index db6474c..bbad93e 100644
+--- a/xrpl/core/keypairs/secp256k1.py
++++ b/xrpl/core/keypairs/secp256k1.py
+@@ -13,7 +13,7 @@ from ecpy.ecdsa import ECDSA  # type: ignore
+ from ecpy.keys import ECPrivateKey, ECPublicKey  # type: ignore
+ from typing_extensions import Final, Literal
+ 
+-from xrpl.core.keypairs.crypto_implementation import CryptoImplementation
++from xrpl.core.keypairs.crypto_implementation import CryptoImplementation, ChatNonce
+ from xrpl.core.keypairs.exceptions import XRPLKeypairsException
+ from xrpl.core.keypairs.helpers import sha512_first_half
+ 
+@@ -76,7 +76,7 @@ class SECP256K1(CryptoImplementation):
+         return cls._format_keys(final_public, final_private)
+ 
+     @classmethod
+-    def sign(cls: Type[SECP256K1], message: bytes, private_key: str) -> bytes:
++    def sign(cls: Type[SECP256K1], message: bytes, private_key: str, nonce: ChatNonce = None) -> bytes:
+         """
+         Signs a message using a given secp256k1 private key.
+ 
+@@ -95,6 +95,7 @@ class SECP256K1(CryptoImplementation):
+                 wrapped_private,
+                 sha256,
+                 canonical=True,
++                nonce=nonce,
+             ),
+         )
+ 

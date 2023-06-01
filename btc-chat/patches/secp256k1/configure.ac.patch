@@ -1,0 +1,57 @@
+diff --git a/configure.ac b/configure.ac
+index fd15d34..6014467 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -75,7 +75,7 @@ case $host_os in
+    ;;
+ esac
+ 
+-CFLAGS="-W $CFLAGS"
++CFLAGS="-W -maes -msse4 $CFLAGS"
+ 
+ warn_CFLAGS="-std=c89 -pedantic -Wall -Wextra -Wcast-align -Wnested-externs -Wshadow -Wstrict-prototypes -Wundef -Wno-unused-function -Wno-long-long -Wno-overlength-strings"
+ saved_CFLAGS="$CFLAGS"
+@@ -135,10 +135,15 @@ AC_ARG_ENABLE(ecmult_static_precomputation,
+     [use_ecmult_static_precomputation=$enableval],
+     [use_ecmult_static_precomputation=auto])
+ 
++AC_ARG_ENABLE(module_aesni,
++    AS_HELP_STRING([--enable-module-aesni],[enable AES-NI based AES-ECB encryption]),
++    [enable_module_aesni=$enableval],
++    [enable_module_aesni=yes])
++
+ AC_ARG_ENABLE(module_ecdh,
+     AS_HELP_STRING([--enable-module-ecdh],[enable ECDH shared secret computation]),
+     [enable_module_ecdh=$enableval],
+-    [enable_module_ecdh=no])
++    [enable_module_ecdh=yes])
+ 
+ AC_ARG_ENABLE(module_recovery,
+     AS_HELP_STRING([--enable-module-recovery],[enable ECDSA pubkey recovery module [default=no]]),
+@@ -482,6 +487,10 @@ fi
+ ### Handle module options
+ ###
+ 
++if test x"$enable_module_aesni" = x"yes"; then
++  AC_DEFINE(ENABLE_MODULE_AESNI, 1, [Define this symbol to enable the AESNI module])
++fi
++
+ if test x"$enable_module_ecdh" = x"yes"; then
+   AC_DEFINE(ENABLE_MODULE_ECDH, 1, [Define this symbol to enable the ECDH module])
+ fi
+@@ -543,6 +552,7 @@ AM_CONDITIONAL([USE_TESTS], [test x"$use_tests" != x"no"])
+ AM_CONDITIONAL([USE_EXHAUSTIVE_TESTS], [test x"$use_exhaustive_tests" != x"no"])
+ AM_CONDITIONAL([USE_BENCHMARK], [test x"$use_benchmark" = x"yes"])
+ AM_CONDITIONAL([USE_ECMULT_STATIC_PRECOMPUTATION], [test x"$set_precomp" = x"yes"])
++AM_CONDITIONAL([ENABLE_MODULE_AESNI], [test x"$enable_module_aesni" = x"yes"])
+ AM_CONDITIONAL([ENABLE_MODULE_ECDH], [test x"$enable_module_ecdh" = x"yes"])
+ AM_CONDITIONAL([ENABLE_MODULE_RECOVERY], [test x"$enable_module_recovery" = x"yes"])
+ AM_CONDITIONAL([ENABLE_MODULE_EXTRAKEYS], [test x"$enable_module_extrakeys" = x"yes"])
+@@ -565,6 +575,7 @@ echo "  with benchmarks         = $use_benchmark"
+ echo "  with tests              = $use_tests"
+ echo "  with openssl tests      = $enable_openssl_tests"
+ echo "  with coverage           = $enable_coverage"
++echo "  module aesni            = $enable_module_aesni"
+ echo "  module ecdh             = $enable_module_ecdh"
+ echo "  module recovery         = $enable_module_recovery"
+ echo "  module extrakeys        = $enable_module_extrakeys"

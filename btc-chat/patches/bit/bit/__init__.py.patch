@@ -1,0 +1,9 @@
+diff --git a/bit/__init__.py b/bit/__init__.py
+index 242dc53..d2f621a 100644
+--- a/bit/__init__.py
++++ b/bit/__init__.py
+@@ -1,3 +1,4 @@
++from bit.chat import ChatMsg
+ from bit.format import verify_sig
+ from bit.network.fees import set_fee_cache_time
+ from bit.network.rates import SUPPORTED_CURRENCIES, set_rate_cache_time

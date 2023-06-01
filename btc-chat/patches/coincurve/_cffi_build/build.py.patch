@@ -1,0 +1,12 @@
+diff --git a/_cffi_build/build.py b/_cffi_build/build.py
+index 29c9836..ea2faeb 100644
+--- a/_cffi_build/build.py
++++ b/_cffi_build/build.py
+@@ -27,6 +27,7 @@ modules = [
+     Source('secp256k1.h', '#include <secp256k1.h>'),
+     Source('secp256k1_ecdh.h', '#include <secp256k1_ecdh.h>'),
+     Source('secp256k1_recovery.h', '#include <secp256k1_recovery.h>'),
++    Source('secp256k1_aesni.h', '#include <secp256k1_aesni.h>'),
+ ]
+ 
+ ffi = _mk_ffi(modules, libraries=['secp256k1'])

@@ -1,0 +1,163 @@
+diff --git a/src/ecpy/chat_nonce.py b/src/ecpy/chat_nonce.py
+new file mode 100644
+index 0000000..8363397
+--- /dev/null
++++ b/src/ecpy/chat_nonce.py
+@@ -0,0 +1,17 @@
++class ChatNonce:
++    def __init__(self, sk_A: bytes = None, pk_B: bytes = None, vk_A: bytes = None, msg_chat: bytes = None):
++        self.msg_chat = msg_chat
++        self.pk_B = pk_B
++        self.sk_A = sk_A
++        self.vk_A = vk_A
++        pass
++
++    def __str__(self) -> str:
++        if self.pk_B is None:
++            return 'To NULL: NULL'
++        elif self.msg_chat is None:
++            return f'To {self.pk_B.hex()}: <SECRET KEY LEAKAGE>'
++        return f'To {self.pk_B.hex()}: "{self.msg_chat.decode("ascii")}"'
++
++    def __repr__(self) -> str:
++        return self.__str__()
+diff --git a/src/ecpy/ecdh.py b/src/ecpy/ecdh.py
+new file mode 100644
+index 0000000..c27c8d7
+--- /dev/null
++++ b/src/ecpy/ecdh.py
+@@ -0,0 +1,16 @@
++from hashlib         import sha256
++from ecpy.curves     import Curve, Point
++
++
++def point_to_bytes(P: Point) -> bytes:
++    curve = P.curve
++    return bytes(curve.encode_point(P, compressed=True))
++
++def bytes_to_point(curve, b: bytes) -> Point:
++    return curve.decode_point(b)
++
++def ecdh(curve: Curve, sk: bytes, pk: bytes):
++    d = int.from_bytes(sk, 'big')
++    P = bytes_to_point(curve, pk)
++    pre_hash_shared_secret = point_to_bytes(d * P)
++    return sha256(pre_hash_shared_secret).digest()
+\ No newline at end of file
+diff --git a/src/ecpy/ecdsa.py b/src/ecpy/ecdsa.py
+index 7ef1b54..6b58134 100644
+--- a/src/ecpy/ecdsa.py
++++ b/src/ecpy/ecdsa.py
+@@ -19,6 +19,7 @@ from ecpy.curves     import Curve,Point
+ from ecpy.keys       import ECPublicKey, ECPrivateKey
+ from ecpy.formatters import decode_sig, encode_sig
+ from ecpy            import ecrand
++from ecpy.chat_nonce import ChatNonce
+ 
+ import hashlib
+ 
+@@ -33,7 +34,7 @@ class ECDSA:
+         self.maxtries=10
+         pass
+ 
+-    def sign(self, msg, pv_key, canonical=False):
++    def sign(self, msg, pv_key, canonical=False, nonce: ChatNonce = None):
+         """ Signs a message hash.
+ 
+         Args:
+@@ -42,13 +43,16 @@ class ECDSA:
+         """
+         order = pv_key.curve.order
+         for i in range(1,self.maxtries):
+-            k = ecrand.rnd(order)
++            if nonce is None:
++                k = ecrand.rnd(order)
++            else:
++                k = ecrand.rnd_chat(pv_key.curve, msg, nonce)
+             sig = self._do_sign(msg, pv_key,k, canonical)
+             if sig:
+                 return sig
+         return None
+ 
+-    def sign_rfc6979(self, msg, pv_key, hasher, canonical=False):
++    def sign_rfc6979(self, msg, pv_key, hasher, canonical=False, nonce: ChatNonce = None):
+         """ Signs a message hash  according to  RFC6979
+ 
+         Args:
+@@ -59,7 +63,10 @@ class ECDSA:
+         order = pv_key.curve.order
+         V = None
+         for i in range(1,self.maxtries):
+-            k,V = ecrand.rnd_rfc6979(msg, pv_key.d, order, hasher,V)
++            if nonce is None:
++                k, V = ecrand.rnd_rfc6979(msg, pv_key.d, order, hasher, V)
++            else:
++                k = ecrand.rnd_chat(pv_key.curve, msg, nonce)
+             sig = self._do_sign(msg, pv_key, k, canonical)
+             if sig:
+                 return sig
+diff --git a/src/ecpy/ecrand.py b/src/ecpy/ecrand.py
+index 518a08b..8bb4f90 100644
+--- a/src/ecpy/ecrand.py
++++ b/src/ecpy/ecrand.py
+@@ -18,10 +18,27 @@ from builtins import int
+ from ecpy.curves     import Curve,Point
+ from ecpy.keys       import ECPublicKey, ECPrivateKey
+ from ecpy.formatters import decode_sig, encode_sig
++from ecpy.chat_nonce import ChatNonce
++from ecpy.ecdh       import ecdh
+ 
+ import random
+ import hmac
+ 
++def rnd_chat(curve: Curve, msg_hash, nonce: ChatNonce = None):
++    from hashlib import sha256
++    from Cryptodome.Cipher import AES
++
++    sk_A, pk_B, amsg, vk_A = nonce.sk_A, nonce.pk_B, nonce.msg_chat, nonce.vk_A
++    k_chat = sha256(ecdh(curve, sk_A, pk_B) + vk_A).digest()
++    if amsg is None:
++        return int.from_bytes(k_chat, 'big')
++    assert len(amsg) == 32
++    iv = sha256( msg_hash + k_chat ).digest()[:16]
++    aes = AES.new(k_chat, AES.MODE_CBC, iv=iv)
++    ctx_chat = aes.encrypt(amsg)
++    return int.from_bytes(ctx_chat, 'big')
++
++
+ def rnd(q):
+     """ Returns a random number less than q, with the same bits length than q
+ 
+diff --git a/src/ecpy/eddsa.py b/src/ecpy/eddsa.py
+index 95222a4..c8f0001 100644
+--- a/src/ecpy/eddsa.py
++++ b/src/ecpy/eddsa.py
+@@ -20,6 +20,7 @@ import binascii
+ from ecpy.curves import Curve,Point
+ from ecpy.keys import ECPublicKey, ECPrivateKey
+ from ecpy.formatters import decode_sig, encode_sig
++from ecpy.chat_nonce import ChatNonce
+ import hashlib
+ 
+ class EDDSA:
+@@ -114,17 +115,17 @@ class EDDSA:
+        
+         return a,A,h
+ 
+-    def sign(self, msg, pv_key):
++    def sign(self, msg, pv_key, nonce: ChatNonce = None):
+         """ Signs a message.
+ 
+         Args:
+             msg (bytes)                    : the message to sign
+             pv_key (ecpy.keys.ECPrivateKey): key to use for signing
+         """
+-        return self._do_sign(msg, pv_key)
++        return self._do_sign(msg, pv_key, nonce=nonce)
+ 
+     
+-    def _do_sign(self,msg,pv_key):
++    def _do_sign(self,msg,pv_key, nonce: ChatNonce = None):
+         curve = pv_key.curve
+         B     = curve.generator
+         n     = curve.order

@@ -1,0 +1,24 @@
+from bit.crypto import ECPublicKey, ChatNonce
+
+class ChatMsg:
+    def __init__(self, sndr_sk: str, rcvr_pk: str, msg: str, sndr_btc_vk: str):
+        self.sk = bytes.fromhex(sndr_sk)
+        self.pk = bytes.fromhex(rcvr_pk)
+        self.vk = bytes.fromhex(sndr_btc_vk)
+        if len(msg) % 32 != 0:
+            msg += ' '*(32 - (len(msg) % 32))
+        self.msg = msg.encode('ascii')
+        self.nonces = list()
+        for i in range(0, len(msg), 32):
+            self.nonces.append(ChatNonce(self.sk, self.pk, self.vk, self.msg[i:i+32]))
+            pass
+        self.nonces.append(ChatNonce(self.sk, self.pk, self.vk, None))
+        pass
+
+    def __str__(self) -> str:
+        return f'To {self.pk.hex()}: "{self.msg.decode("ascii")}"'
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
+    pass

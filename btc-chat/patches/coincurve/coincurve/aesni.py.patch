@@ -1,0 +1,52 @@
+diff --git a/coincurve/aesni.py b/coincurve/aesni.py
+new file mode 100644
+index 0000000..52fcfdb
+--- /dev/null
++++ b/coincurve/aesni.py
+@@ -0,0 +1,46 @@
++from ._libsecp256k1 import ffi, lib
++
++class AES256CBC:
++    BLOCKSIZE = 16
++    KEYSIZE = 32
++    ROUNDS = 14
++    def __init__(self, key: bytes) -> None:
++        if len(key) != self.KEYSIZE:
++            raise ValueError('Key length is not 32 bytes.')
++        self.key = ffi.from_buffer('unsigned char[]', key)
++        pass
++
++    def _enc_key_expansion(self):
++        keyexp = ffi.new('unsigned char[]', (self.ROUNDS+1)*self.BLOCKSIZE)
++        lib.secp256k1_aesni_256_key_expansion(keyexp, self.key)
++        return keyexp
++
++    def _dec_key_expansion(self):
++        tmp = ffi.new('unsigned char[]', (self.ROUNDS+1)*self.BLOCKSIZE)
++        keyexp = ffi.new('unsigned char[]', (self.ROUNDS+1)*self.BLOCKSIZE)
++        lib.secp256k1_aesni_256_key_expansion(tmp, self.key)
++        lib.secp256k1_aesni_256_dec_key_expansion(keyexp, tmp)
++        return keyexp
++
++    def encrypt(self, plaintext: bytes, ivec: bytes) -> bytes:
++        if len(plaintext) % 16 == 0:
++            ciphertext_len = len(plaintext)
++            pass
++        else:
++            ciphertext_len = len(plaintext) + (self.BLOCKSIZE - (len(plaintext) % self.BLOCKSIZE))
++            pass
++        ciphertext = ffi.new('unsigned char[]', ciphertext_len)
++        ptx = ffi.from_buffer('unsigned char[]', plaintext)
++        iv = ffi.from_buffer('unsigned char[16]', ivec)
++        lib.secp256k1_aesni_cbc_encrypt(ciphertext, ptx, iv, len(plaintext), self._enc_key_expansion(), self.ROUNDS)
++        return bytes(ffi.buffer(ciphertext, ciphertext_len))
++
++    def decrypt(self, ciphertext: bytes, ivec: bytes) -> bytes:
++        plaintext_len = len(ciphertext)
++        plaintext = ffi.new('unsigned char[]', plaintext_len)
++        ctx = ffi.from_buffer('unsigned char[]', ciphertext)
++        iv = ffi.from_buffer('unsigned char[16]', ivec)
++        lib.secp256k1_aesni_cbc_decrypt(plaintext, ctx, iv, len(ciphertext), self._dec_key_expansion(), self.ROUNDS)
++        return bytes(ffi.buffer(plaintext, plaintext_len))
++    
++    pass

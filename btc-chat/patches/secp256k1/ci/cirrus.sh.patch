@@ -1,0 +1,24 @@
+diff --git a/ci/cirrus.sh b/ci/cirrus.sh
+index f223a91..bb0c557 100755
+--- a/ci/cirrus.sh
++++ b/ci/cirrus.sh
+@@ -16,7 +16,7 @@ valgrind --version || true
+     --enable-experimental="$EXPERIMENTAL" \
+     --with-test-override-wide-multiply="$WIDEMUL" --with-bignum="$BIGNUM" --with-asm="$ASM" \
+     --enable-ecmult-static-precomputation="$STATICPRECOMPUTATION" --with-ecmult-gen-precision="$ECMULTGENPRECISION" \
+-    --enable-module-ecdh="$ECDH" --enable-module-recovery="$RECOVERY" \
++    --enable-module-aesni="$AESNI" --enable-module-ecdh="$ECDH" --enable-module-recovery="$RECOVERY" \
+     --enable-module-schnorrsig="$SCHNORRSIG" \
+     --with-valgrind="$WITH_VALGRIND" \
+     --host="$HOST" $EXTRAFLAGS
+@@ -71,6 +71,10 @@ then
+     then
+         $EXEC ./bench_recover >> bench.log 2>&1
+     fi
++    if [ "$AESNI" = "yes" ]
++    then
++        $EXEC ./bench_aesni >> bench.log 2>&1
++    fi
+     if [ "$ECDH" = "yes" ]
+     then
+         $EXEC ./bench_ecdh >> bench.log 2>&1

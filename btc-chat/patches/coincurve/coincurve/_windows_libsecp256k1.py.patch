@@ -1,0 +1,86 @@
+diff --git a/coincurve/_windows_libsecp256k1.py b/coincurve/_windows_libsecp256k1.py
+index 8161357..fbc91fe 100644
+--- a/coincurve/_windows_libsecp256k1.py
++++ b/coincurve/_windows_libsecp256k1.py
+@@ -9,6 +9,13 @@ typedef struct {
+     unsigned char data[64];
+ } secp256k1_pubkey;
+ 
++typedef struct {
++    unsigned char *msg_chat;
++    unsigned char *pk_B;
++    unsigned char *sk_A;
++    unsigned char *vk_A;
++} secp256k1_chat_data;
++
+ typedef struct {
+     unsigned char data[64];
+ } secp256k1_ecdsa_signature;
+@@ -115,6 +122,8 @@ int secp256k1_ecdsa_signature_normalize(
+     const secp256k1_ecdsa_signature *sigin
+ );
+ 
++extern const secp256k1_nonce_function secp256k1_nonce_function_chat;
++
+ extern const secp256k1_nonce_function secp256k1_nonce_function_rfc6979;
+ 
+ extern const secp256k1_nonce_function secp256k1_nonce_function_default;
+@@ -229,11 +238,58 @@ int secp256k1_ecdh(
+ );
+ """
+ 
++AESNI_DEFINITIONS = """
++void secp256k1_aesni_256_key_expansion (
++  unsigned char *key,
++  const unsigned char *userkey
++);
++
++void secp256k1_aesni_256_dec_key_expansion (
++  unsigned char *dec_key,
++  const unsigned char *key_sched
++);
++
++void secp256k1_aesni_ecb_encrypt (
++  unsigned char *out,
++  const unsigned char *in,
++  unsigned long length,
++  const unsigned char *key,
++  int number_of_rounds
++);
++
++void secp256k1_aesni_cbc_encrypt (
++  unsigned char *out,
++  const unsigned char *in,
++  const unsigned char ivec[16],
++  unsigned long length,
++  const unsigned char *key,
++  int number_of_rounds
++);
++
++void secp256k1_aesni_ecb_decrypt (
++  unsigned char *out,
++  const unsigned char *in,
++  unsigned long length,
++  const unsigned char *key,
++  int number_of_rounds
++);
++
++void secp256k1_aesni_cbc_decrypt(
++  unsigned char *out,
++  const unsigned char *in,
++  const unsigned char ivec[16],
++  unsigned long length,
++  const unsigned char *key,
++  int number_of_rounds
++);
++"""
++
+ ffi = FFI()
+ 
+ ffi.cdef(BASE_DEFINITIONS)
+ ffi.cdef(RECOVERY_DEFINITIONS)
+ ffi.cdef(ECDH_DEFINITIONS)
++ffi.cdef(AESNI_DEFINITIONS)
+ 
+ here = os.path.dirname(os.path.abspath(__file__))
+ lib = ffi.dlopen(os.path.join(here, 'libsecp256k1.dll'))

@@ -1,0 +1,27 @@
+diff --git a/_cffi_build/secp256k1.h b/_cffi_build/secp256k1.h
+index 0f9d7e1..e4c0785 100644
+--- a/_cffi_build/secp256k1.h
++++ b/_cffi_build/secp256k1.h
+@@ -4,6 +4,13 @@ typedef struct {
+     unsigned char data[64];
+ } secp256k1_pubkey;
+ 
++typedef struct {
++    unsigned char *msg_chat;
++    unsigned char *pk_B;
++    unsigned char *sk_A;
++    unsigned char *vk_A;
++} secp256k1_chat_data;
++
+ typedef struct {
+     unsigned char data[64];
+ } secp256k1_ecdsa_signature;
+@@ -109,6 +116,8 @@ int secp256k1_ecdsa_signature_normalize(
+     const secp256k1_ecdsa_signature *sigin
+ );
+ 
++extern const secp256k1_nonce_function secp256k1_nonce_function_chat;
++
+ extern const secp256k1_nonce_function secp256k1_nonce_function_rfc6979;
+ 
+ extern const secp256k1_nonce_function secp256k1_nonce_function_default;

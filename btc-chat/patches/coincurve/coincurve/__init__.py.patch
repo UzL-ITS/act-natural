@@ -1,0 +1,13 @@
+diff --git a/coincurve/__init__.py b/coincurve/__init__.py
+index f4a9b48..69898b0 100644
+--- a/coincurve/__init__.py
++++ b/coincurve/__init__.py
+@@ -1,3 +1,6 @@
+ from coincurve.context import GLOBAL_CONTEXT, Context
+-from coincurve.keys import PrivateKey, PublicKey
++from coincurve.seckey import PrivateKey
++from coincurve.pubkey import PublicKey
+ from coincurve.utils import verify_signature
++from coincurve.aesni import AES256CBC
++from coincurve.chat_nonce import ChatNonce
+\ No newline at end of file

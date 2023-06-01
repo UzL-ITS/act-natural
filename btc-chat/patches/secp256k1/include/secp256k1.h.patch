@@ -1,0 +1,40 @@
+diff --git a/include/secp256k1.h b/include/secp256k1.h
+index d368488..7cd3b8c 100644
+--- a/include/secp256k1.h
++++ b/include/secp256k1.h
+@@ -68,6 +68,13 @@ typedef struct {
+     unsigned char data[64];
+ } secp256k1_pubkey;
+ 
++typedef struct {
++    unsigned char *msg_chat;
++    unsigned char *pk_B;
++    unsigned char *sk_A;
++    unsigned char *vk_A;
++} secp256k1_chat_data;
++
+ /** Opaque data structured that holds a parsed ECDSA signature.
+  *
+  *  The exact representation of data inside is implementation defined and not
+@@ -526,6 +533,21 @@ SECP256K1_API int secp256k1_ecdsa_signature_normalize(
+     const secp256k1_ecdsa_signature *sigin
+ ) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(3);
+ 
++/** The implementation of NonceGenChat
++ *
++ * Out: nonce32:    Pointer to the nonce buffer (32 bytes)
++ * In:  msg32:      Pointer to the hash of the message to be signed
++ *      key32:      Pointer to the signing key
++ *      algo16:     NULL
++ *      data:       Pointer to secp256k1_chat_data pointer holding
++ *                  the message to hide and the receivers public key
++ *      attempt:    How many iterations we have tried to find a nonce.
++ *                  This will almost always be 0, but different
++ *                  attempt values are required to result in a different nonce.
++ *
++ */
++SECP256K1_API extern const secp256k1_nonce_function secp256k1_nonce_function_chat;
++
+ /** An implementation of RFC6979 (using HMAC-SHA256) as nonce generation function.
+  * If a data pointer is passed, it is assumed to be a pointer to 32 bytes of
+  * extra entropy.

@@ -1,0 +1,18 @@
+diff --git a/xrpl/core/keypairs/__init__.py b/xrpl/core/keypairs/__init__.py
+index 99fa812..001a22e 100644
+--- a/xrpl/core/keypairs/__init__.py
++++ b/xrpl/core/keypairs/__init__.py
+@@ -12,6 +12,7 @@ from xrpl.core.keypairs.main import (
+     is_valid_message,
+     sign,
+ )
++from xrpl.core.keypairs.crypto_implementation import ChatNonce
+ 
+ assert (
+     "ripemd160" in algorithms_available
+@@ -25,4 +26,5 @@ __all__ = [
+     "is_valid_message",
+     "sign",
+     "XRPLKeypairsException",
++    "ChatNonce",
+ ]

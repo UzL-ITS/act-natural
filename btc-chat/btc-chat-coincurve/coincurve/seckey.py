@@ -1,0 +1,252 @@
+from typing import Tuple
+
+from asn1crypto.keys import ECDomainParameters, ECPointBitString, ECPrivateKey, PrivateKeyAlgorithm, PrivateKeyInfo
+
+from coincurve.chat_nonce import ChatNonce
+from coincurve.context import GLOBAL_CONTEXT, Context
+from coincurve.ecdsa import cdata_to_der, serialize_recoverable
+from coincurve.pubkey import PublicKey
+from coincurve.types import Hasher
+from coincurve.utils import (
+    bytes_to_int,
+    der_to_pem,
+    get_valid_secret,
+    hex_to_bytes,
+    int_to_bytes_padded,
+    pad_scalar,
+    pem_to_der,
+    sha256,
+    validate_secret,
+)
+
+from ._libsecp256k1 import ffi, lib
+
+class PrivateKey:
+    def __init__(self, secret: bytes = None, context: Context = GLOBAL_CONTEXT):
+        """
+        :param secret: The secret used to initialize the private key.
+                       If not provided or `None`, a new key will be generated.
+        """
+        self.secret: bytes = validate_secret(secret) if secret is not None else get_valid_secret()
+        self.context = context
+        self.public_key: PublicKey = PublicKey.from_valid_secret(self.secret, self.context)
+
+    def sign(self, message: bytes, hasher: Hasher = sha256, custom_nonce: ChatNonce = ChatNonce()) -> bytes:
+        """
+        Create an ECDSA signature.
+
+        :param message: The message to sign.
+        :param hasher: The hash function to use, which must return 32 bytes. By default,
+                       the `sha256` algorithm is used. If `None`, no hashing occurs.
+        :param custom_nonce: Custom nonce data in the form `ChatNonce`. Refer to
+                             [secp256k1.h](https://github.com/bitcoin-core/secp256k1/blob/f8c0b57e6ba202b1ce7c5357688de97c9c067697/include/secp256k1.h#L546-L547).
+        :return: The ECDSA signature.
+        :raises ValueError: If the message hash was not 32 bytes long, the nonce generation
+                            function failed, or the private key was invalid.
+        """
+        msg_hash = hasher(message) if hasher is not None else message
+        if len(msg_hash) != 32:
+            raise ValueError('Message hash must be 32 bytes long.')
+
+        signature = ffi.new('secp256k1_ecdsa_signature *')
+        nonce_fn, nonce_data = custom_nonce.struct
+
+        signed = lib.secp256k1_ecdsa_sign(self.context.ctx, signature, msg_hash, self.secret, nonce_fn, nonce_data)
+
+        if not signed:
+            raise ValueError('The nonce generation function failed, or the private key was invalid.')
+
+        return cdata_to_der(signature, self.context)
+
+    def sign_recoverable(self, message: bytes, hasher: Hasher = sha256, custom_nonce: ChatNonce = ChatNonce()) -> bytes:
+        """
+        Create a recoverable ECDSA signature.
+
+        :param message: The message to sign.
+        :param hasher: The hash function to use, which must return 32 bytes. By default,
+                       the `sha256` algorithm is used. If `None`, no hashing occurs.
+        :param custom_nonce: Custom nonce data in the form `ChatNonce`. Refer to
+                             [secp256k1_recovery.h](https://github.com/bitcoin-core/secp256k1/blob/f8c0b57e6ba202b1ce7c5357688de97c9c067697/include/secp256k1_recovery.h#L78-L79).
+        :return: The recoverable ECDSA signature.
+        :raises ValueError: If the message hash was not 32 bytes long, the nonce generation
+                            function failed, or the private key was invalid.
+        """
+        msg_hash = hasher(message) if hasher is not None else message
+        if len(msg_hash) != 32:
+            raise ValueError('Message hash must be 32 bytes long.')
+
+        signature = ffi.new('secp256k1_ecdsa_recoverable_signature *')
+        nonce_fn, nonce_data = custom_nonce.as_struct()
+
+        signed = lib.secp256k1_ecdsa_sign_recoverable(
+            self.context.ctx, signature, msg_hash, self.secret, nonce_fn, nonce_data
+        )
+
+        if not signed:
+            raise ValueError('The nonce generation function failed, or the private key was invalid.')
+
+        return serialize_recoverable(signature, self.context)
+
+    def ecdh(self, public_key: bytes) -> bytes:
+        """
+        Compute an EC Diffie-Hellman secret in constant time.
+
+        !!! note
+            This prevents malleability by returning `sha256(compressed_public_key)` instead of the `x` coordinate
+            directly. See #9.
+
+        :param public_key: The formatted public key.
+        :return: The 32 byte shared secret.
+        :raises ValueError: If the public key could not be parsed or was invalid.
+        """
+        secret = ffi.new('unsigned char [32]')
+
+        lib.secp256k1_ecdh(self.context.ctx, secret, PublicKey(public_key).public_key, self.secret, ffi.NULL, ffi.NULL)
+
+        return bytes(ffi.buffer(secret, 32))
+
+    def add(self, scalar: bytes, update: bool = False):
+        """
+        Add a scalar to the private key.
+
+        :param scalar: The scalar with which to add.
+        :param update: Whether or not to update and return the private key in-place.
+        :return: The new private key, or the modified private key if `update` is `True`.
+        :rtype: PrivateKey
+        :raises ValueError: If the tweak was out of range or the resulting private key was invalid.
+        """
+        scalar = pad_scalar(scalar)
+
+        secret = ffi.new('unsigned char [32]', self.secret)
+
+        success = lib.secp256k1_ec_privkey_tweak_add(self.context.ctx, secret, scalar)
+
+        if not success:
+            raise ValueError('The tweak was out of range, or the resulting private key is invalid.')
+
+        secret = bytes(ffi.buffer(secret, 32))
+
+        if update:
+            self.secret = secret
+            self._update_public_key()
+            return self
+
+        return PrivateKey(secret, self.context)
+
+    def multiply(self, scalar: bytes, update: bool = False):
+        """
+        Multiply the private key by a scalar.
+
+        :param scalar: The scalar with which to multiply.
+        :param update: Whether or not to update and return the private key in-place.
+        :return: The new private key, or the modified private key if `update` is `True`.
+        :rtype: PrivateKey
+        """
+        scalar = validate_secret(scalar)
+
+        secret = ffi.new('unsigned char [32]', self.secret)
+
+        lib.secp256k1_ec_privkey_tweak_mul(self.context.ctx, secret, scalar)
+
+        secret = bytes(ffi.buffer(secret, 32))
+
+        if update:
+            self.secret = secret
+            self._update_public_key()
+            return self
+
+        return PrivateKey(secret, self.context)
+
+    def to_hex(self) -> str:
+        """
+        :return: The private key encoded as a hex string.
+        """
+        return self.secret.hex()
+
+    def to_int(self) -> int:
+        """
+        :return: The private key as an integer.
+        """
+        return bytes_to_int(self.secret)
+
+    def to_pem(self) -> bytes:
+        """
+        :return: The private key encoded in PEM format.
+        """
+        return der_to_pem(self.to_der())
+
+    def to_der(self) -> bytes:
+        """
+        :return: The private key encoded in DER format.
+        """
+        pk = ECPrivateKey(
+            {
+                'version': 'ecPrivkeyVer1',
+                'private_key': self.to_int(),
+                'public_key': ECPointBitString(self.public_key.format(compressed=False)),
+            }
+        )
+
+        return PrivateKeyInfo(
+            {
+                'version': 0,
+                'private_key_algorithm': PrivateKeyAlgorithm(
+                    {
+                        'algorithm': 'ec',
+                        'parameters': ECDomainParameters(name='named', value='1.3.132.0.10'),
+                    }
+                ),
+                'private_key': pk,
+            }
+        ).dump()
+
+    @classmethod
+    def from_hex(cls, hexed: str, context: Context = GLOBAL_CONTEXT):
+        """
+        :param hexed: The private key encoded as a hex string.
+        :param context:
+        :return: The private key.
+        :rtype: PrivateKey
+        """
+        return PrivateKey(hex_to_bytes(hexed), context)
+
+    @classmethod
+    def from_int(cls, num: int, context: Context = GLOBAL_CONTEXT):
+        """
+        :param num: The private key as an integer.
+        :param context:
+        :return: The private key.
+        :rtype: PrivateKey
+        """
+        return PrivateKey(int_to_bytes_padded(num), context)
+
+    @classmethod
+    def from_pem(cls, pem: bytes, context: Context = GLOBAL_CONTEXT):
+        """
+        :param pem: The private key encoded in PEM format.
+        :param context:
+        :return: The private key.
+        :rtype: PrivateKey
+        """
+        return PrivateKey(
+            int_to_bytes_padded(PrivateKeyInfo.load(pem_to_der(pem)).native['private_key']['private_key']), context
+        )
+
+    @classmethod
+    def from_der(cls, der: bytes, context: Context = GLOBAL_CONTEXT):
+        """
+        :param der: The private key encoded in DER format.
+        :param context:
+        :return: The private key.
+        :rtype: PrivateKey
+        """
+        return PrivateKey(int_to_bytes_padded(PrivateKeyInfo.load(der).native['private_key']['private_key']), context)
+
+    def _update_public_key(self):
+        created = lib.secp256k1_ec_pubkey_create(self.context.ctx, self.public_key.public_key, self.secret)
+
+        if not created:
+            raise ValueError('Invalid secret.')
+
+    def __eq__(self, other) -> bool:
+        return self.secret == other.secret
